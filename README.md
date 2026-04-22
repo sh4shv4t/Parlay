@@ -30,56 +30,59 @@ Parlay is built on:
 
 ### Prerequisites
 
-- Python 3.11+
+- Python **3.11** (required; training and game stacks expect 3.11)
 - A Google AI Studio API key ([get one free](https://aistudio.google.com/app/apikey))
 - (Optional) A Hugging Face token for training and model pushing
 
-### 1. Clone and set up environment
+### Windows (recommended): PowerShell from repo root
 
-```bash
+All `scripts\*.ps1` files assume the **current directory is the project root**. If execution policy blocks scripts, run:
+
+`Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`
+
+```powershell
 git clone https://github.com/your-username/parlay.git
 cd parlay
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-
-# macOS / Linux
-source .venv/bin/activate
+.\scripts\setup.ps1
+# Edit .env and set GOOGLE_API_KEY=your_key_here
+.\scripts\run.ps1
 ```
 
-### 2. Install dependencies
+Optional: `.\venv\Scripts\python -m scripts.seed_scenarios` for demo leaderboard rows. Training venv: `.\scripts\setup_train.ps1`, then `.\scripts\train_data.ps1` (and related `train_sft` / `train_grpo` / `evaluate` scripts).
 
-```bash
-pip install -r requirements.txt
-```
+You can also use **GNU Make** on Windows (e.g. Git Bash or Chocolatey): `make setup`, `make run`, `make test`, `make clean`. The Makefile uses `venv\Scripts\` paths.
 
-### 3. Configure environment
+### Cross-platform: Docker
+
+Use Docker when you want the same flow on every OS (no local venv):
 
 ```bash
 cp .env.example .env
-# Edit .env and set GOOGLE_API_KEY=your_key_here
+# Set GOOGLE_API_KEY in .env
+docker compose up --build
 ```
 
-### 4. Initialize the database
+See the [Docker](#docker) section for service URLs and training images.
 
-```bash
-python -m scripts.init_db
-python -m scripts.seed_scenarios   # optional: adds demo leaderboard entries
-```
-
-### 5. Start the server
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### 6. Open in browser
+### Open in browser (local server)
 
 ```
 http://localhost:8000          # Game dashboard
 http://localhost:8000/train    # Training dashboard
 http://localhost:8000/docs     # Interactive API docs (Swagger)
+```
+
+### macOS / Linux (manual venv)
+
+```bash
+git clone https://github.com/your-username/parlay.git
+cd parlay
+python3.11 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python -m scripts.init_db
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ---
@@ -154,7 +157,11 @@ parlay/
 ├── scripts/
 │   ├── __init__.py
 │   ├── init_db.py             # Create SQLite schema (idempotent)
-│   └── seed_scenarios.py      # Insert demo leaderboard entries
+│   ├── seed_scenarios.py      # Insert demo leaderboard entries
+│   ├── setup.ps1              # Windows: game venv + .env + DB init
+│   ├── setup_train.ps1        # Windows: training venv (PyTorch, TRL, …)
+│   ├── run.ps1 / run_env.ps1 / run_mcp.ps1
+│   ├── train_*.ps1 / evaluate.ps1 / test.ps1
 │
 ├── tests/
 │   ├── __init__.py
@@ -170,6 +177,8 @@ parlay/
 │
 ├── requirements.txt           # Core dependencies
 ├── requirements-train.txt     # Training-only dependencies (torch, trl, peft…)
+├── Makefile                   # Windows-oriented targets (venv\\Scripts\\ paths)
+├── .gitattributes             # LF for source; CRLF for .ps1
 ├── .env.example               # Environment variable template
 ├── .gitignore
 ├── docker-compose.yml         # Multi-service Docker deployment
@@ -463,9 +472,10 @@ Train Qwen2.5-7B-Instruct on the top 60% of episodes by reward:
 
 ```bash
 python -m training.sft_train \
+  --model Qwen/Qwen2.5-7B-Instruct \
   --data data/episodes.jsonl \
   --output models/parlay-sft \
-  --base_model Qwen/Qwen2.5-7B-Instruct
+  --threshold 0.60
 ```
 
 Uses LoRA (r=16, alpha=32) on `q_proj` and `v_proj`. Full fine-tuning is never used.
@@ -476,7 +486,7 @@ Apply Group Relative Policy Optimization with G=8 generations per prompt:
 
 ```bash
 python -m training.grpo_train \
-  --sft_model models/parlay-sft \
+  --model models/parlay-sft \
   --data data/episodes.jsonl \
   --output models/parlay-grpo \
   --steps 500
@@ -496,7 +506,8 @@ python -m training.evaluate \
   --base Qwen/Qwen2.5-7B-Instruct \
   --sft models/parlay-sft \
   --grpo models/parlay-grpo \
-  --output results/eval.png
+  --data data/episodes.jsonl \
+  --output results/eval_results.json
 ```
 
 Produces a three-bar comparison chart: **Base vs SFT vs GRPO** across mean reward, deal efficiency, and bluff detection rate.

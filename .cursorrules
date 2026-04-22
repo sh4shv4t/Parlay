@@ -160,3 +160,13 @@ A feature is done when:
 5. Uses `--parlay-*` CSS variables (UI) or imports from `reward.py` (reward logic)
 6. `docker compose up --build` passes without errors
 7. For training code: produces a visible upward reward curve in evaluate.py output
+
+## Windows Development Rules
+
+- Venv paths use Windows convention: venv\Scripts\ not venv/bin/
+- All shell scripts have .ps1 equivalents in scripts/
+- Path separators in Python code: always use pathlib.Path — never os.path or hardcoded slashes
+- Line endings: repository uses LF (add .gitattributes with * text=auto)
+- aiosqlite on Windows: SQLite DB path must use pathlib.Path, never raw string paths
+- Never use os.system() — use subprocess.run() with shell=False
+- Scripts that need to be executable on both platforms: check sys.platform and branch

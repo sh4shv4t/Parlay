@@ -10,7 +10,7 @@ import uuid
 from typing import Any
 
 import numpy as np
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
 
 from .exceptions import (
     EpisodeAlreadyDoneError,
@@ -307,3 +307,14 @@ async def get_session(session_id: str) -> dict:
     if session_id not in _sessions:
         raise SessionNotFoundError(f"Session {session_id} not found")
     return {"state": _sessions[session_id].model_dump()}
+
+
+_env_app = FastAPI(title="Parlay OpenEnv", version="1.0.0")
+_env_app.include_router(router)
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    _port = int(os.getenv("ENV_PORT", "8001"))
+    uvicorn.run(_env_app, host="0.0.0.0", port=_port)
