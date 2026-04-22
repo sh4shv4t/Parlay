@@ -1,6 +1,6 @@
 """
 Google Gemini 2.0 Flash client for Parlay.
-All calls are async (via run_in_executor). All errors return SYNTHETIC_RESPONSE.
+Uses the google-genai SDK. All calls are async (via run_in_executor). All errors return SYNTHETIC_RESPONSE.
 """
 import asyncio
 import json
@@ -8,12 +8,41 @@ import logging
 import os
 from typing import Optional
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
-genai.configure(api_key=os.environ.get("GOOGLE_API_KEY", ""))
-_model = genai.GenerativeModel("gemini-2.0-flash")
+MODEL_ID = "gemini-2.0-flash"
+
+_client: Optional[genai.Client] = None
+
+
+def _get_client() -> genai.Client:
+    """Lazily construct API client (empty key is allowed; calls then fail and return synthetic output)."""
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or "")
+    return _client
+
+
+def _legacy_messages_to_history(messages: list[dict]) -> list[types.Content]:
+    """Convert legacy {'role','parts'} messages to google-genai Content list."""
+    contents: list[types.Content] = []
+    for m in messages:
+        role = m.get("role", "user")
+        if role not in ("user", "model"):
+            role = "user"
+        raw_parts = m.get("parts") or []
+        parts: list[types.Part] = []
+        for p in raw_parts:
+            text = p if isinstance(p, str) else str(p)
+            parts.append(types.Part(text=text))
+        if not parts:
+            parts.append(types.Part(text=""))
+        contents.append(types.Content(role=role, parts=parts))
+    return contents
+
 
 SYNTHETIC_RESPONSE: dict = {
     "utterance": "I need a moment to consider your proposal.",
@@ -49,22 +78,25 @@ async def call_gemini(
             f'{{"utterance": "...", "offer_amount": <number or null>, '
             f'"tactical_move": <string or null>}}'
         )
+        user_message = f"{full_prompt}\n\nUser: {last_msg}"
 
-        loop = asyncio.get_event_loop()
-        chat = _model.start_chat(history=history)
-
-        response = await loop.run_in_executor(
-            None,
-            lambda: chat.send_message(
-                f"{full_prompt}\n\nUser: {last_msg}",
-                generation_config=genai.types.GenerationConfig(
+        def _call() -> types.GenerateContentResponse:
+            chat = _get_client().chats.create(
+                model=MODEL_ID,
+                history=_legacy_messages_to_history(history),
+            )
+            return chat.send_message(
+                user_message,
+                config=types.GenerateContentConfig(
                     max_output_tokens=max_tokens,
                     temperature=0.7,
                 ),
-            ),
-        )
+            )
 
-        text = response.text.strip()
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, _call)
+
+        text = (response.text or "").strip()
         text = text.replace("```json", "").replace("```", "").strip()
         parsed = json.loads(text)
 
@@ -79,10 +111,10 @@ async def call_gemini(
 
     except json.JSONDecodeError:
         logger.warning("Gemini JSON parse failed — using text fallback")
-        try:
-            return {**SYNTHETIC_RESPONSE, "utterance": response.text[:300]}
-        except Exception:
-            return SYNTHETIC_RESPONSE
+        raw = text[:300] if text else ""
+        if raw:
+            return {**SYNTHETIC_RESPONSE, "utterance": raw}
+        return SYNTHETIC_RESPONSE
     except Exception as exc:
         logger.error(f"Gemini API error: {exc}")
         return SYNTHETIC_RESPONSE
@@ -117,19 +149,22 @@ async def call_gemini_tom(
     )
 
     try:
-        loop = asyncio.get_event_loop()
-        chat = _model.start_chat(history=conversation_history)
-        response = await loop.run_in_executor(
-            None,
-            lambda: chat.send_message(
+        def _call() -> types.GenerateContentResponse:
+            chat = _get_client().chats.create(
+                model=MODEL_ID,
+                history=_legacy_messages_to_history(conversation_history),
+            )
+            return chat.send_message(
                 tom_prompt,
-                generation_config=genai.types.GenerationConfig(
+                config=types.GenerateContentConfig(
                     max_output_tokens=200,
                     temperature=0.3,
                 ),
-            ),
-        )
-        text = response.text.strip().replace("```json", "").replace("```", "").strip()
+            )
+
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, _call)
+        text = (response.text or "").strip().replace("```json", "").replace("```", "").strip()
         return json.loads(text)
     except Exception as exc:
         logger.error(f"Gemini ToM inference error: {exc}")
