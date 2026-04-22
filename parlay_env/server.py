@@ -33,6 +33,34 @@ from .models import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/env", tags=["OpenEnv"])
 
+# Fallback observation returned when any server-side error occurs so the
+# WebSocket never crashes on an LLM or state-machine failure.
+_FALLBACK_BELIEF = BeliefState(
+    est_budget=0.0,
+    est_walk_away=0.0,
+    est_urgency=0.5,
+    est_has_alternative=False,
+    confidence=0.1,
+)
+FALLBACK_OBSERVATION = ParlayObservation(
+    step_count=0,
+    episode_done=False,
+    current_offer=0.0,
+    opponent_offer=0.0,
+    zopa_lower=0.0,
+    zopa_upper=0.0,
+    nash_point=0.0,
+    tension_score=0.0,
+    belief_state=_FALLBACK_BELIEF,
+    last_utterance="[Connection issue — AI is thinking]",
+    available_moves=list(TacticalMove),
+    credibility_points=100,
+    reward=0.0,
+    cumulative_reward=0.0,
+    drift_event=None,
+    act=1,
+)
+
 # In-memory session store (replaced by Redis in prod)
 _sessions: dict[str, ParlayState] = {}
 
@@ -171,8 +199,12 @@ async def env_websocket(websocket: WebSocket) -> None:
             ) as exc:
                 result = {"error": str(exc)}
             except Exception:
-                logger.exception("Unhandled error in env WebSocket")
-                result = {"error": "Internal server error"}
+                logger.exception("Unhandled error in env WebSocket — returning fallback observation")
+                result = {
+                    "observation": FALLBACK_OBSERVATION.model_dump(),
+                    "done": False,
+                    "_fallback": True,
+                }
 
             await websocket.send_json(result)
     except WebSocketDisconnect:

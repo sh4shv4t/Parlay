@@ -1,23 +1,30 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Parlay — RL Negotiation Game. Bloomberg terminal meets poker app." />
-  <title>Parlay — Negotiation Arena</title>
+  <meta name="description" content="Parlay — The Deal Room. An RL-powered negotiation arena." />
+  <title>Parlay — The Deal Room</title>
 
-  <!-- External: Three.js r128 (loaded first — character.js depends on it) -->
+  <!-- Three.js r128 — must load before character.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
           crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
-  <!-- External: Chart.js 4.4.1 -->
+  <!-- Chart.js 4.4.1 -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"
           crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
-  <!-- Parlay styles -->
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=4" />
 </head>
 <body>
+
+<!-- ═══════════════════════════════════════════════════════════
+     DEMO BANNER
+════════════════════════════════════════════════════════════ -->
+<div id="demo-banner" class="demo-banner hidden" role="status">
+  Demo mode — AI responses are simulated · Add GOOGLE_API_KEY to .env for real gameplay
+  <button class="demo-banner-dismiss" type="button" id="btn-dismiss-demo" aria-label="Dismiss demo banner">✕</button>
+</div>
 
 <!-- ═══════════════════════════════════════════════════════════
      LOADING OVERLAY
@@ -25,58 +32,79 @@
 <div id="loading-overlay" class="loading-overlay hidden" role="status" aria-live="polite">
   <div class="loading-card">
     <div class="spinner" aria-hidden="true"></div>
-    <p class="loading-text">Gemini is thinking…</p>
+    <p class="loading-text">The room is thinking…</p>
   </div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════
-     SETUP MODAL
+     ONBOARDING — STEP 1: NAME
 ════════════════════════════════════════════════════════════ -->
-<div id="setup-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-  <div class="modal">
-    <div class="modal-header">
-      <h1 class="modal-title" id="modal-title">Welcome to Parlay</h1>
-      <p class="modal-subtitle">An RL-powered negotiation arena. Choose your deal, choose your style.</p>
-    </div>
+<div id="onboarding-step-1" class="onboarding-overlay start-active" role="dialog" aria-modal="true" aria-label="Enter your name">
+  <div class="onboarding-card">
+    <div class="onboarding-step-num">Step 1 of 3</div>
+    <h1 class="onboarding-headline">Who's at<br>the table?</h1>
+    <p class="onboarding-sub">Every deal starts with a name on the door.</p>
 
-    <div class="modal-body">
-      <!-- Player name -->
-      <div class="form-group">
-        <label class="form-label" for="player-name-input">Your Name</label>
-        <input
-          type="text"
-          id="player-name-input"
-          class="form-input"
-          placeholder="e.g. Jordan Weiss"
-          maxlength="40"
-          autocomplete="off"
-        />
-      </div>
+    <input
+      type="text"
+      id="step1-name"
+      class="onboarding-name-input"
+      placeholder="Your name…"
+      maxlength="40"
+      autocomplete="off"
+      autofocus
+    />
 
-      <!-- Scenario selection -->
-      <div class="form-group">
-        <div class="form-label">Select a Scenario</div>
-        <div id="scenario-grid" class="selector-grid">
-          <!-- Populated by loadScenarios() — fallbacks also included -->
-        </div>
-      </div>
+    <div id="step1-error" class="onboarding-error"></div>
 
-      <!-- Persona selection -->
-      <div class="form-group">
-        <div class="form-label">Choose Your Negotiation Style</div>
-        <div id="persona-grid" class="persona-grid">
-          <!-- Populated by loadPersonas() -->
-        </div>
-      </div>
-
-      <!-- Error placeholder -->
-      <p id="modal-error" class="hidden text-red text-sm" role="alert"></p>
-    </div>
-
-    <div class="modal-footer">
-      <button id="btn-start-game" class="btn btn-primary" type="button">
-        Enter the Room &rarr;
+    <div class="onboarding-footer">
+      <button id="step1-continue" class="btn btn-primary" type="button">
+        Continue &rarr;
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     ONBOARDING — STEP 2: SCENARIO
+════════════════════════════════════════════════════════════ -->
+<div id="onboarding-step-2" class="onboarding-overlay" role="dialog" aria-modal="true" aria-label="Choose a scenario" inert>
+  <div class="onboarding-card wide">
+    <div class="onboarding-step-num">Step 2 of 3</div>
+    <h1 class="onboarding-headline">Choose your deal</h1>
+    <p class="onboarding-sub">Select a case from the dossier.</p>
+
+    <div id="scenario-dossier-grid" class="scenario-dossier-grid" role="radiogroup" aria-label="Negotiation scenarios">
+      <!-- Populated by loadScenarios() -->
+    </div>
+
+    <div id="step2-error" class="onboarding-error"></div>
+
+    <div class="onboarding-footer">
+      <button id="step2-back" class="btn btn-ghost" type="button">&larr; Back</button>
+      <button id="step2-continue" class="btn btn-primary" type="button">Continue &rarr;</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     ONBOARDING — STEP 3: PERSONA
+════════════════════════════════════════════════════════════ -->
+<div id="onboarding-step-3" class="onboarding-overlay" role="dialog" aria-modal="true" aria-label="Choose your opponent" inert>
+  <div class="onboarding-card wide">
+    <div class="onboarding-step-num">Step 3 of 3</div>
+    <h1 class="onboarding-headline">Choose your opponent</h1>
+    <p class="onboarding-sub">Study the faces across the table.</p>
+
+    <div id="persona-cards-grid" class="persona-cards-grid" role="radiogroup" aria-label="Negotiator personas">
+      <!-- Populated by loadPersonas() -->
+    </div>
+
+    <div id="step3-error" class="onboarding-error"></div>
+
+    <div class="onboarding-footer">
+      <button id="step3-back" class="btn btn-ghost" type="button">&larr; Back</button>
+      <button id="step3-start" class="btn btn-primary" type="button">Enter the Room &rarr;</button>
     </div>
   </div>
 </div>
@@ -97,13 +125,8 @@
 
   <div class="header-actions">
     <p id="global-error" class="hidden text-red text-sm" role="alert"></p>
-    <button
-      id="dark-toggle"
-      class="dark-toggle"
-      type="button"
-      aria-label="Toggle dark mode"
-      title="Toggle dark mode"
-    ></button>
+    <button id="dark-toggle" class="dark-toggle" type="button"
+            aria-label="Toggle display mode" title="Toggle display mode"></button>
   </div>
 </header>
 
@@ -125,13 +148,12 @@
         </div>
       </div>
 
-      <!-- CP Bar -->
       <div class="cp-section">
         <div class="cp-label-row">
-          <span class="cp-label">Cognitive Points</span>
+          <span class="cp-label">Credibility Points</span>
           <span id="cp-value" class="cp-value mono">100 / 100</span>
         </div>
-        <div class="cp-track" role="progressbar" aria-label="Cognitive Points" aria-valuemin="0" aria-valuemax="100">
+        <div class="cp-track" role="progressbar" aria-label="Credibility Points" aria-valuemin="0" aria-valuemax="100">
           <div id="cp-fill" class="cp-fill" style="width: 100%;"></div>
         </div>
       </div>
@@ -158,28 +180,22 @@
       </div>
       <div class="achievements-strip">
         <div class="badge" data-achievement="first_deal" title="Close your first deal">
-          <span class="badge-icon" aria-hidden="true">🤝</span>
-          First Deal
+          <span class="badge-icon" aria-hidden="true">🤝</span>First Deal
         </div>
         <div class="badge" data-achievement="anchor_master" title="Win with an aggressive anchor">
-          <span class="badge-icon" aria-hidden="true">⚓</span>
-          Anchor
+          <span class="badge-icon" aria-hidden="true">⚓</span>Anchor
         </div>
         <div class="badge" data-achievement="drift_adapter" title="Adapt to a drift event">
-          <span class="badge-icon" aria-hidden="true">🌪️</span>
-          Drift
+          <span class="badge-icon" aria-hidden="true">🌪️</span>Drift
         </div>
         <div class="badge" data-achievement="zopa_optimal" title="Close within 5% of Nash point">
-          <span class="badge-icon" aria-hidden="true">💎</span>
-          Optimal
+          <span class="badge-icon" aria-hidden="true">💎</span>Optimal
         </div>
         <div class="badge" data-achievement="clean_sweep" title="Complete all 3 acts">
-          <span class="badge-icon" aria-hidden="true">🏆</span>
-          Sweep
+          <span class="badge-icon" aria-hidden="true">🏆</span>Sweep
         </div>
         <div class="badge" data-achievement="bluffer" title="Successfully bluff the opponent">
-          <span class="badge-icon" aria-hidden="true">🃏</span>
-          Bluff
+          <span class="badge-icon" aria-hidden="true">🃏</span>Bluff
         </div>
       </div>
     </section>
@@ -212,7 +228,7 @@
     <!-- Chat Thread -->
     <div id="chat-thread" class="chat-thread" role="log" aria-live="polite" aria-label="Negotiation conversation">
       <div class="message-system">
-        Set up your game above to start negotiating.
+        Step through the door to begin negotiating.
       </div>
     </div>
 
@@ -268,28 +284,23 @@
       </div>
 
       <div id="zopa-track" class="zopa-track-outer" role="img" aria-label="ZOPA visual range">
-        <!-- Green zone -->
         <div id="zopa-zone" class="zopa-zone"></div>
 
-        <!-- Player BATNA marker -->
         <div id="marker-player" class="zopa-marker marker-player" style="left: 20%;">
           <div class="zopa-marker-line"></div>
           <span class="zopa-label">Your BATNA</span>
         </div>
 
-        <!-- Opponent BATNA marker -->
         <div id="marker-opponent" class="zopa-marker marker-opponent" style="left: 80%;">
           <div class="zopa-marker-line"></div>
           <span class="zopa-label">Their BATNA</span>
         </div>
 
-        <!-- Current offer marker -->
         <div id="marker-current" class="zopa-marker marker-current" style="left: 50%; display: none;">
           <div class="zopa-marker-line"></div>
           <span class="zopa-label">Offer</span>
         </div>
 
-        <!-- Nash diamond -->
         <div id="nash-diamond" class="nash-diamond" style="left: 50%; display: none;" title="Nash Equilibrium Point"></div>
       </div>
 
@@ -328,7 +339,7 @@
 
     <!-- Persona Info -->
     <div id="persona-info" class="persona-info">
-      <div id="persona-avatar" class="persona-avatar shark" aria-hidden="true">🦈</div>
+      <div id="persona-avatar" class="persona-avatar" aria-hidden="true">◈</div>
       <div>
         <div id="persona-name" class="persona-name">—</div>
         <div id="persona-desc" class="persona-desc text-muted text-xs">Choose a persona to begin</div>
@@ -342,7 +353,6 @@
       </div>
 
       <div class="tom-beliefs">
-        <!-- Cooperative -->
         <div class="belief-row">
           <span class="belief-label text-xs">Cooperative</span>
           <div class="belief-track" role="progressbar" aria-label="Cooperative belief">
@@ -352,7 +362,6 @@
           <div id="belief-cooperative-conf" class="belief-confidence confidence-medium"></div>
         </div>
 
-        <!-- Competitive -->
         <div class="belief-row">
           <span class="belief-label text-xs">Competitive</span>
           <div class="belief-track" role="progressbar" aria-label="Competitive belief">
@@ -362,17 +371,15 @@
           <div id="belief-competitive-conf" class="belief-confidence confidence-low"></div>
         </div>
 
-        <!-- Reservation -->
         <div class="belief-row">
           <span class="belief-label text-xs">Reservation</span>
-          <div class="belief-track" role="progressbar" aria-label="Reservation sensitivity belief">
+          <div class="belief-track" role="progressbar" aria-label="Reservation sensitivity">
             <div id="belief-reservation-fill" class="belief-fill reservation" style="width:40%;"></div>
           </div>
           <span id="belief-reservation-pct" class="belief-pct">40%</span>
           <div id="belief-reservation-conf" class="belief-confidence confidence-low"></div>
         </div>
 
-        <!-- Flexibility -->
         <div class="belief-row">
           <span class="belief-label text-xs">Flexibility</span>
           <div class="belief-track" role="progressbar" aria-label="Flexibility belief">
@@ -383,7 +390,6 @@
         </div>
       </div>
 
-      <!-- Belief confidence over time chart -->
       <div class="mt-4 sparkline-wrap" style="height: 80px;">
         <canvas id="belief-chart" class="sparkline-canvas" aria-label="Belief confidence over time"></canvas>
       </div>
@@ -405,13 +411,8 @@
     <section class="panel" aria-label="Leaderboard">
       <div class="panel-header">
         <span class="panel-title">Top 5</span>
-        <button
-          class="btn btn-ghost btn-sm"
-          type="button"
-          onclick="loadLeaderboard()"
-          aria-label="Refresh leaderboard"
-          title="Refresh"
-        >↻</button>
+        <button class="btn btn-ghost btn-sm" type="button"
+                onclick="loadLeaderboard()" aria-label="Refresh leaderboard" title="Refresh">↻</button>
       </div>
 
       <table class="leaderboard-table" role="table" aria-label="Top players leaderboard">
@@ -436,9 +437,9 @@
 </main>
 
 <!-- Scripts (order matters) -->
-<script src="/static/character.js"></script>
-<script src="/static/chart.js"></script>
-<script src="/static/app.js"></script>
+<script src="/static/character.js?v=4"></script>
+<script src="/static/chart.js?v=4"></script>
+<script src="/static/app.js?v=4"></script>
 
 </body>
 </html>

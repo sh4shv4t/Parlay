@@ -1,3 +1,12 @@
+---
+title: Parlay
+emoji: ◈
+colorFrom: indigo
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # Parlay — The RL Negotiation Arena
 
 > **The arena where AIs learn to close.**
@@ -733,6 +742,38 @@ GRPO (Group Relative Policy Optimization) eliminates the need for a separate cri
 | `SFT_OUTPUT` | `models/parlay-sft` | SFT checkpoint output path |
 | `GRPO_OUTPUT` | `models/parlay-grpo` | GRPO checkpoint output path |
 | `HF_REPO_ID` | — | HF Hub repo for model push |
+
+---
+
+## Testing Without API Keys
+
+Everything in Parlay runs in **mock mode** when `GOOGLE_API_KEY` is not set.
+Mock mode returns canned persona-consistent responses so you can play and test
+the full game loop without any external account.
+
+```bash
+# 1. Set up the game environment
+make setup
+
+# 2. Run the keyless test suite (zero API calls)
+make test-keyless
+
+# 3. Start the server in mock mode
+make run
+
+# 4. Open the game in your browser
+#    → http://localhost:8000
+#    A "Demo mode" banner confirms mock mode is active.
+```
+
+To switch to real AI: add `GOOGLE_API_KEY=your_key` to `.env` and restart.
+
+To test the exact HF Spaces container locally before pushing:
+
+```bash
+make docker-test
+# → http://localhost:7860
+```
 
 ---
 

@@ -1,41 +1,46 @@
 version: "3.9"
 
 services:
-  game:
+  # Combined game + OpenEnv server (matches the single HF Spaces Dockerfile)
+  parlay:
     build:
       context: .
-      dockerfile: Dockerfile.game
+      dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "7860:7860"
     environment:
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - MAX_TURNS_PER_EPISODE=20
       - TOP_PLAYER_THRESHOLD=0.60
     volumes:
       - ./parlay.db:/app/parlay.db
     restart: unless-stopped
 
-  env:
-    build:
-      context: .
-      dockerfile: Dockerfile.env
-    ports:
-      - "8001:8001"
-    environment:
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-    depends_on:
-      - game
-    restart: unless-stopped
-
+  # MCP server — shares the same image but runs the MCP entry-point
   mcp:
     build:
       context: .
-      dockerfile: Dockerfile.game
+      dockerfile: Dockerfile
     command: python -m mcp_server.server sse
     ports:
       - "8002:8002"
     environment:
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
     depends_on:
-      - game
+      - parlay
     restart: unless-stopped
+
+  # Training is intentionally separate and never deployed to HF Spaces
+  train:
+    build:
+      context: .
+      dockerfile: Dockerfile.train
+    profiles:
+      - training
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HF_REPO_ID=${HF_REPO_ID:-}
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models

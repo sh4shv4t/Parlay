@@ -13,7 +13,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from parlay_env.server import router as env_router
 from dashboard.api import router as dashboard_router
@@ -68,16 +68,54 @@ if static_dir.exists():
 @app.get("/", include_in_schema=False)
 async def serve_index() -> FileResponse:
     """Serve the main game dashboard."""
-    return FileResponse("dashboard/index.html")
+    return FileResponse(
+        "dashboard/index.html",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 @app.get("/train", include_in_schema=False)
 async def serve_train() -> FileResponse:
     """Serve the training dashboard."""
-    return FileResponse("dashboard/train.html")
+    return FileResponse(
+        "dashboard/train.html",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    """Browsers request this by default; avoid noisy 404s in logs."""
+    return Response(status_code=204)
 
 
 @app.get("/health")
 async def health() -> dict:
-    """Global health check."""
-    return {"status": "ok", "service": "parlay", "version": "1.0.0"}
+    """
+    Global health check.
+
+    Returns:
+        status:  "ok" when server is running.
+        db:      "ok" if parlay.db is reachable, "error" otherwise.
+        gemini:  "configured" when GOOGLE_API_KEY is set, "mock" otherwise.
+        version: Application version string.
+    """
+    import os
+    import aiosqlite
+
+    db_status = "error"
+    try:
+        async with aiosqlite.connect("parlay.db") as db:
+            await db.execute("SELECT 1")
+        db_status = "ok"
+    except Exception as exc:
+        logger.warning(f"Health check DB probe failed: {exc}")
+
+    gemini_status = "configured" if os.environ.get("GOOGLE_API_KEY", "").strip() else "mock"
+
+    return {
+        "status": "ok",
+        "db": db_status,
+        "gemini": gemini_status,
+        "version": "1.0.0",
+    }

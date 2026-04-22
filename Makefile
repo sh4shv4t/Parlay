@@ -45,6 +45,12 @@ train-grpo:
 evaluate:
 	venv-train\Scripts\python -m training.evaluate --base Qwen/Qwen2.5-7B-Instruct --sft models/parlay-sft --grpo models/parlay-grpo --data data/episodes.jsonl --output results/eval_results.json
 
+test-keyless:
+	venv\Scripts\pytest tests\test_keyless.py -v
+
+docker-test:
+	docker build -t parlay-test . && docker run -p 7860:7860 --env-file .env parlay-test
+
 clean:
 	if exist venv rd /s /q venv
 	if exist venv-train rd /s /q venv-train

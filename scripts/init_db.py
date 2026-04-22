@@ -17,6 +17,20 @@ logger = logging.getLogger(__name__)
 DB_PATH = "parlay.db"
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS sessions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id    TEXT    NOT NULL UNIQUE,
+    player_name   TEXT    NOT NULL,
+    scenario_id   TEXT    NOT NULL,
+    persona       TEXT    NOT NULL,
+    started_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at  DATETIME,
+    status        TEXT    DEFAULT 'active'
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_session_id
+    ON sessions(session_id);
+
 CREATE TABLE IF NOT EXISTS leaderboard (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     player_name   TEXT    NOT NULL,

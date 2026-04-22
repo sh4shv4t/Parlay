@@ -509,3 +509,145 @@ async def get_leaderboard(scenario_id: Optional[str] = None, limit: int = 10) ->
 async def health() -> dict:
     """Health check endpoint."""
     return {"status": "ok", "service": "parlay-dashboard"}
+
+
+# ── Unified game step (used by frontend JS) ──────────────────────────────────
+
+class GameStepRequest(BaseModel):
+    session_id: str
+    move: str = "counter"
+    offer_amount: Optional[float] = None
+    card_id: Optional[str] = None
+
+
+@router.post("/game/step")
+async def game_step(req: GameStepRequest) -> dict:
+    """
+    Unified step endpoint — dispatches to move / accept / walkaway.
+
+    Args:
+        session_id:   Active session UUID.
+        move:         "counter" | "anchor" | "concede" | "package" | "accept" | "walk_away".
+        offer_amount: Required for counter / anchor / concede / package moves.
+        card_id:      Optional tactical card identifier.
+
+    Returns:
+        Opponent response, updated observation, and done flag.
+    """
+    match req.move:
+        case "accept":
+            return await accept_deal(AcceptRequest(session_id=req.session_id))
+        case "walk_away":
+            return await walk_away(WalkAwayRequest(session_id=req.session_id))
+        case _:
+            if req.offer_amount is None:
+                raise HTTPException(status_code=400, detail="offer_amount required for counter moves")
+            tactic: Optional[str] = None
+            if req.move == "anchor":
+                tactic = "anchor_high"
+            return await make_move(MoveRequest(
+                session_id=req.session_id,
+                amount=req.offer_amount,
+                message=req.move,
+                tactical_move=tactic,
+            ))
+
+
+# ── Session API (simplified, used by tests and external integrations) ─────────
+
+class SessionStartRequest(BaseModel):
+    scenario_id: str = "saas_enterprise"
+    persona: str = "shark"
+    player_name: str = "Player"
+
+
+class SessionStepRequest(BaseModel):
+    amount: float = 145_000.0
+    message: str = "I propose this amount."
+    tactical_move: Optional[str] = None
+
+
+@router.post("/session/start")
+async def session_start(req: SessionStartRequest) -> dict:
+    """
+    Start a new session (simplified API).
+    Works in both mock and live Gemini mode.
+
+    Args:
+        scenario_id: One of the five scenario IDs.
+        persona:     One of the five persona IDs.
+        player_name: Display name for the player.
+
+    Returns:
+        session_id and status.
+    """
+    try:
+        session_id, sess = _build_session(req.scenario_id, req.persona, req.player_name)
+    except (InvalidScenarioError, InvalidPersonaError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Unexpected error in session/start: {exc}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    _sessions[session_id] = sess
+    logger.info(f"Session started (simplified): {session_id}, {req.scenario_id}/{req.persona}")
+    return {"session_id": session_id, "status": "ok"}
+
+
+@router.post("/session/{session_id}/step")
+async def session_step(session_id: str, req: SessionStepRequest) -> dict:
+    """
+    Execute one negotiation step in a session.
+    Returns a mock AI response when GOOGLE_API_KEY is absent.
+
+    Args:
+        session_id: Active session UUID from /session/start.
+        amount:     Player's offer amount.
+        message:    Player's utterance.
+        tactical_move: Optional tactical move string.
+
+    Returns:
+        observation dict and opponent response.
+    """
+    if session_id not in _sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    sess = _sessions[session_id]
+    if sess["done"]:
+        raise HTTPException(status_code=400, detail="Episode already concluded")
+
+    turn = sess["step_count"]
+    gemini_messages = [
+        {"role": "user", "parts": [f"Offer: {req.amount:,.0f}. {req.message}"]}
+    ]
+    opponent_resp = await call_gemini(
+        sess["system_prompt"],
+        gemini_messages,
+        persona=sess["persona"],
+    )
+
+    sess["offer_history"].append(req.amount)
+    sess["step_count"] += 1
+    sess["done"] = sess["step_count"] >= MAX_TURNS
+    _sessions[session_id] = sess
+
+    hidden = sess["hidden"]
+    zopa = compute_zopa(hidden.budget_ceiling, hidden.walk_away_price)
+    nash = compute_nash_bargaining_solution(hidden.budget_ceiling, hidden.walk_away_price)
+    tension = min(100.0, 20.0 + (sess["step_count"] / MAX_TURNS) * 80.0)
+
+    return {
+        "observation": {
+            "step_count": sess["step_count"],
+            "zopa_lower": zopa[0] if zopa else 0.0,
+            "zopa_upper": zopa[1] if zopa else 0.0,
+            "nash_point": nash,
+            "tension_score": tension,
+            "belief_state": sess["tom"].current_belief.model_dump(),
+            "credibility_points": sess["credibility_points"],
+            "act": sess["act"],
+        },
+        "opponent": opponent_resp,
+        "done": sess["done"],
+        "turns_remaining": MAX_TURNS - sess["step_count"],
+    }
