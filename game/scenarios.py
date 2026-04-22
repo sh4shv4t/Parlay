@@ -1,0 +1,112 @@
+"""B2B negotiation scenarios for Parlay."""
+from dataclasses import dataclass, field
+
+from parlay_env.exceptions import InvalidScenarioError
+
+
+@dataclass(frozen=True)
+class DriftEvent:
+    trigger_turn: int
+    event: str
+    effect_on_urgency: float
+    effect_on_has_alternative: bool
+
+
+@dataclass(frozen=True)
+class Scenario:
+    id: str
+    title: str
+    description: str
+    anchor_seller: float
+    anchor_buyer: float
+    batna_seller: float
+    batna_buyer: float
+    zopa: tuple[float, float]
+    currency: str
+    unit: str
+    drift_events: list[DriftEvent] = field(default_factory=list)
+    difficulty: int = 2  # 1=easy, 2=medium, 3=hard
+
+
+SCENARIOS: list[Scenario] = [
+    Scenario(
+        id="saas_enterprise",
+        title="Enterprise SaaS Contract",
+        description="500-seat analytics platform. Buyer has two competing bids.",
+        anchor_seller=180_000, anchor_buyer=110_000,
+        batna_seller=125_000, batna_buyer=165_000,
+        zopa=(125_000, 165_000), currency="USD", unit="annual contract value",
+        difficulty=2,
+        drift_events=[
+            DriftEvent(trigger_turn=8, event="Competitor drops price 15%",
+                       effect_on_urgency=-0.3, effect_on_has_alternative=True),
+            DriftEvent(trigger_turn=14, event="Q-end deadline announced",
+                       effect_on_urgency=0.4, effect_on_has_alternative=False),
+        ],
+    ),
+    Scenario(
+        id="consulting_retainer",
+        title="Consulting Retainer",
+        description="Monthly strategy retainer. Scope is intentionally ambiguous.",
+        anchor_seller=45_000, anchor_buyer=22_000,
+        batna_seller=25_000, batna_buyer=40_000,
+        zopa=(25_000, 40_000), currency="USD", unit="monthly retainer",
+        difficulty=1,
+        drift_events=[
+            DriftEvent(trigger_turn=6, event="Scope expanded mid-discussion",
+                       effect_on_urgency=0.2, effect_on_has_alternative=False),
+        ],
+    ),
+    Scenario(
+        id="hiring_package",
+        title="Senior Engineer Offer",
+        description="Total comp negotiation: base + equity + signing bonus.",
+        anchor_seller=240_000, anchor_buyer=180_000,
+        batna_seller=195_000, batna_buyer=230_000,
+        zopa=(195_000, 230_000), currency="USD", unit="total annual comp",
+        difficulty=2,
+        drift_events=[
+            DriftEvent(trigger_turn=5, event="Competing offer received",
+                       effect_on_urgency=-0.25, effect_on_has_alternative=True),
+        ],
+    ),
+    Scenario(
+        id="vendor_hardware",
+        title="Hardware Vendor Contract",
+        description="200 server units bulk purchase. Volume discounts + warranty.",
+        anchor_seller=2_400_000, anchor_buyer=1_600_000,
+        batna_seller=1_750_000, batna_buyer=2_200_000,
+        zopa=(1_750_000, 2_200_000), currency="USD", unit="total contract value",
+        difficulty=3,
+        drift_events=[
+            DriftEvent(trigger_turn=10, event="Supply chain delay announced",
+                       effect_on_urgency=0.35, effect_on_has_alternative=False),
+        ],
+    ),
+    Scenario(
+        id="acquisition_term_sheet",
+        title="Startup Acquisition",
+        description="Acqui-hire: valuation, retention packages, earnout structure.",
+        anchor_seller=18_000_000, anchor_buyer=9_000_000,
+        batna_seller=10_500_000, batna_buyer=16_000_000,
+        zopa=(10_500_000, 16_000_000), currency="USD", unit="acquisition value",
+        difficulty=3,
+        drift_events=[
+            DriftEvent(trigger_turn=7, event="Due diligence reveals tech debt",
+                       effect_on_urgency=-0.2, effect_on_has_alternative=False),
+            DriftEvent(trigger_turn=13, event="Second acquirer enters",
+                       effect_on_urgency=-0.4, effect_on_has_alternative=True),
+        ],
+    ),
+]
+
+_SCENARIO_MAP: dict[str, Scenario] = {s.id: s for s in SCENARIOS}
+
+
+def get_scenario(scenario_id: str) -> Scenario:
+    """Get a scenario by ID. Raises InvalidScenarioError if not found."""
+    if scenario_id not in _SCENARIO_MAP:
+        raise InvalidScenarioError(
+            f"Unknown scenario: {scenario_id!r}. Valid: {list(_SCENARIO_MAP)}"
+        )
+    return _SCENARIO_MAP[scenario_id]

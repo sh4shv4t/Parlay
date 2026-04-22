@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+  game:
+    build:
+      context: .
+      dockerfile: Dockerfile.game
+    ports:
+      - "8000:8000"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - MAX_TURNS_PER_EPISODE=20
+      - TOP_PLAYER_THRESHOLD=0.60
+    volumes:
+      - ./parlay.db:/app/parlay.db
+    restart: unless-stopped
+
+  env:
+    build:
+      context: .
+      dockerfile: Dockerfile.env
+    ports:
+      - "8001:8001"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    depends_on:
+      - game
+    restart: unless-stopped
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.game
+    command: python -m mcp_server.server sse
+    ports:
+      - "8002:8002"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    depends_on:
+      - game
+    restart: unless-stopped

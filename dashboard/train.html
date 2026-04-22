@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Parlay — Training Dashboard. GRPO reward curves and model comparison." />
+  <title>Parlay — Training Dashboard</title>
+
+  <!-- Chart.js 4.4.1 (no Three.js needed here) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════════════════════ -->
+<header class="app-header" role="banner">
+  <div class="header-brand">
+    <span class="brand-dot" aria-hidden="true"></span>
+    <span>Parlay</span>
+    <span class="stat-chip blue" style="margin-left: 8px; font-size: 0.6875rem;">Training</span>
+  </div>
+
+  <nav class="header-nav" aria-label="Site navigation">
+    <a href="/index.html">Game</a>
+    <a href="/train.html" class="active">Training</a>
+  </nav>
+
+  <div class="header-actions">
+    <button
+      id="dark-toggle"
+      class="dark-toggle"
+      type="button"
+      aria-label="Toggle dark mode"
+      title="Toggle dark mode"
+    ></button>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════
+     MAIN
+════════════════════════════════════════════════════════════ -->
+<main style="max-width: 1200px; margin: 0 auto; padding: 24px 16px;" role="main">
+
+  <!-- Page title row -->
+  <div class="flex items-center gap-4 mb-4" style="margin-bottom: 24px;">
+    <div>
+      <h1 style="font-size: 1.375rem; font-weight: 800; letter-spacing: -0.02em; color: var(--parlay-ink);">
+        Training Dashboard
+      </h1>
+      <p style="font-size: 0.875rem; color: var(--parlay-ink-3); margin-top: 2px;">
+        GRPO fine-tuning on Qwen2.5-7B-Instruct · Parlay reward functions
+      </p>
+    </div>
+    <div style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
+      <span id="training-status-chip" class="stat-chip blue">Ready</span>
+      <button id="btn-run-training" class="btn btn-primary" type="button" onclick="runTraining()">
+        ▶ Run Training
+      </button>
+    </div>
+  </div>
+
+  <!-- ── MODEL COMPARISON CARDS ──────────────────────────── -->
+  <div class="train-grid" style="margin-bottom: 24px;">
+
+    <!-- Base Model -->
+    <div class="model-card">
+      <div class="model-tag base">Base</div>
+      <div style="font-size: 0.8125rem; font-weight: 600; color: var(--parlay-ink); margin-bottom: 12px;">
+        Qwen2.5-7B-Instruct
+      </div>
+
+      <div class="metric-row">
+        <span class="metric-name">Avg Reward</span>
+        <span id="base-reward" class="metric-val">—</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Deal Rate</span>
+        <span id="base-deal-rate" class="metric-val">—</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">ZOPA Efficiency</span>
+        <span id="base-zopa-eff" class="metric-val">—</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">ToM Accuracy</span>
+        <span id="base-tom-acc" class="metric-val">—</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Drift Adapt.</span>
+        <span id="base-drift-adapt" class="metric-val">—</span>
+      </div>
+    </div>
+
+    <!-- SFT Model -->
+    <div class="model-card">
+      <div class="model-tag sft">SFT</div>
+      <div style="font-size: 0.8125rem; font-weight: 600; color: var(--parlay-ink); margin-bottom: 12px;">
+        Qwen2.5-7B + SFT Warmup
+      </div>
+
+      <div class="metric-row">
+        <span class="metric-name">Avg Reward</span>
+        <span id="sft-reward" class="metric-val">—</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Deal Rate</span>
+        <span id="sft-deal-rate" class="metric-val">—</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">ZOPA Efficiency</span>
+        <span id="sft-zopa-eff" class="metric-val">—</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">ToM Accuracy</span>
+        <span id="sft-tom-acc" class="metric-val">—</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Drift Adapt.</span>
+        <span id="sft-drift-adapt" class="metric-val">—</span>
+      </div>
+    </div>
+
+    <!-- GRPO Model -->
+    <div class="model-card highlight">
+      <div class="model-tag grpo">GRPO</div>
+      <div style="font-size: 0.8125rem; font-weight: 600; color: var(--parlay-ink); margin-bottom: 12px;">
+        Qwen2.5-7B + SFT + GRPO
+      </div>
+
+      <div class="metric-row">
+        <span class="metric-name">Avg Reward</span>
+        <span id="grpo-reward" class="metric-val positive">—</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Deal Rate</span>
+        <span id="grpo-deal-rate" class="metric-val positive">—</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">ZOPA Efficiency</span>
+        <span id="grpo-zopa-eff" class="metric-val positive">—</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">ToM Accuracy</span>
+        <span id="grpo-tom-acc" class="metric-val positive">—</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Drift Adapt.</span>
+        <span id="grpo-drift-adapt" class="metric-val positive">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── REWARD CURVE CHART ─────────────────────────────── -->
+  <div class="chart-panel" style="margin-bottom: 24px;">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+      <h2 style="font-size: 1rem; font-weight: 700; color: var(--parlay-ink);">Reward Curve</h2>
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-ghost btn-sm" type="button" onclick="loadEvalResults()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" type="button" onclick="switchChartView('comparison')" id="tab-comparison">Comparison</button>
+        <button class="btn btn-ghost btn-sm" type="button" onclick="switchChartView('live')" id="tab-live">Live Curve</button>
+        <button class="btn btn-ghost btn-sm" type="button" onclick="switchChartView('radar')" id="tab-radar">Radar</button>
+      </div>
+    </div>
+
+    <div id="chart-comparison-wrap" style="height: 300px; position: relative;">
+      <canvas id="comparison-chart" aria-label="Model comparison bar chart"></canvas>
+    </div>
+
+    <div id="chart-live-wrap" style="height: 300px; position: relative; display: none;">
+      <canvas id="live-reward-chart" aria-label="Live GRPO training reward curve"></canvas>
+    </div>
+
+    <div id="chart-radar-wrap" style="height: 300px; position: relative; display: none;">
+      <canvas id="radar-chart" aria-label="Efficiency radar chart"></canvas>
+    </div>
+  </div>
+
+  <!-- ── TRAINING CONFIG ───────────────────────────────── -->
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
+
+    <!-- GRPO Hyperparams -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">GRPO Configuration</span>
+      </div>
+
+      <div class="config-grid">
+        <div class="config-item">
+          <span class="config-key">Base Model</span>
+          <span id="cfg-base-model" class="config-val">Qwen/Qwen2.5-7B-Instruct</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">Generations (G)</span>
+          <span class="config-val">8</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">KL β (beta)</span>
+          <span class="config-val">0.001</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">Clip ε (epsilon)</span>
+          <span class="config-val">0.2</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">Learning Rate</span>
+          <span class="config-val">5e-7</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">Reward Scale</span>
+          <span class="config-val">batch</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">LoRA r</span>
+          <span class="config-val">16</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">LoRA α</span>
+          <span class="config-val">32</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">Target Modules</span>
+          <span class="config-val">q_proj, v_proj</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">Top Player θ</span>
+          <span id="cfg-top-threshold" class="config-val">0.60</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data Generation Config -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Data Generation</span>
+      </div>
+
+      <div class="config-grid">
+        <div class="config-item">
+          <span class="config-key">Min Episodes</span>
+          <span class="config-val">500</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">Per Pair Min</span>
+          <span class="config-val">20</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">Noise Rate</span>
+          <span class="config-val">30%</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">Drift Rate</span>
+          <span class="config-val">40%</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">Coalition (Act 3)</span>
+          <span class="config-val">25%</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">Train / Eval Split</span>
+          <span class="config-val">90 / 10</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">LLM Generator</span>
+          <span class="config-val">Gemini 2.0 Flash</span>
+        </div>
+        <div class="config-item">
+          <span class="config-key">Personas × Scenarios</span>
+          <span class="config-val">5 × 5 = 25</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── HOW TO RUN ──────────────────────────────────────── -->
+  <div class="panel" style="margin-bottom: 24px;">
+    <div class="panel-header">
+      <span class="panel-title">Run Training Pipeline</span>
+    </div>
+
+    <div style="display: flex; gap: 32px; flex-wrap: wrap;">
+      <div class="steps-list" style="flex: 1; min-width: 280px;">
+        <div class="step-item">
+          <div class="step-num">1</div>
+          <div class="step-text">
+            Install dependencies and set environment variables:<br />
+            <code class="step-code">pip install -r requirements.txt</code>
+            then set <code class="step-code">GOOGLE_API_KEY</code> and <code class="step-code">HF_TOKEN</code>.
+          </div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">2</div>
+          <div class="step-text">
+            Generate self-play training data via Gemini:<br />
+            <code class="step-code">python -m training.generate_data --episodes 500</code>
+          </div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">3</div>
+          <div class="step-text">
+            SFT warmup on top-player episodes:<br />
+            <code class="step-code">python -m training.sft_train</code>
+          </div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">4</div>
+          <div class="step-text">
+            GRPO fine-tuning with Parlay reward functions:<br />
+            <code class="step-code">python -m training.grpo_train</code>
+          </div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">5</div>
+          <div class="step-text">
+            Evaluate and generate the comparison chart:<br />
+            <code class="step-code">python -m training.evaluate --output results/</code>
+          </div>
+        </div>
+        <div class="step-item">
+          <div class="step-num">6</div>
+          <div class="step-text">
+            Push to Hugging Face Hub:<br />
+            <code class="step-code">python -m training.push_to_hub</code>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reward function breakdown -->
+      <div style="flex: 1; min-width: 240px;">
+        <div class="panel-title" style="margin-bottom: 12px;">Reward Function Weights</div>
+
+        <div class="metric-row">
+          <span class="metric-name">Deal Efficiency (ZOPA)</span>
+          <span class="metric-val">0.35</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-name">Capitulation Cliff penalty</span>
+          <span class="metric-val negative">−Ω</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-name">ToM Accuracy</span>
+          <span class="metric-val">0.20</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-name">Drift Adaptation</span>
+          <span class="metric-val">0.15</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-name">Move Diversity</span>
+          <span class="metric-val">0.10</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-name">Act Completion Bonus</span>
+          <span class="metric-val">0.10</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-name">Format Validity</span>
+          <span class="metric-val">0.10</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TRAINING PROGRESS ──────────────────────────────── -->
+  <div class="training-progress-wrap" style="margin-bottom: 24px;">
+    <div class="panel-header">
+      <span class="panel-title">Training Progress</span>
+      <span id="training-step-label" class="text-xs text-muted mono">Step 0 / —</span>
+    </div>
+    <div class="training-progress-bar-track">
+      <div id="training-progress-fill" class="training-progress-bar-fill" style="width: 0%;"></div>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-top: 4px; font-size: 0.6875rem; color: var(--parlay-ink-3);">
+      <span>SFT Data Gen</span>
+      <span>SFT Train</span>
+      <span>GRPO Train</span>
+      <span>Evaluate</span>
+    </div>
+  </div>
+
+  <!-- ── TRAINING LOG ───────────────────────────────────── -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Training Log</span>
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-ghost btn-sm" type="button" onclick="clearLog()">Clear</button>
+        <button class="btn btn-ghost btn-sm" type="button" onclick="refreshLog()">↻</button>
+      </div>
+    </div>
+    <div id="training-log" class="training-log" role="log" aria-live="polite" aria-label="Training log output">
+      <span class="log-line info">[ Parlay Training Dashboard ]</span>
+      <span class="log-line">Ready. Click "Run Training" to begin, or use the CLI commands above.</span>
+    </div>
+  </div>
+
+</main>
+
+<!-- ── Training scripts ──────────────────────────────────── -->
+<script src="/static/chart.js"></script>
+<script>
+// ── Dark mode ─────────────────────────────────────────────
+(function() {
+  const saved = localStorage.getItem("parlay-theme");
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const theme = saved || (prefersDark ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", theme);
+
+  const toggle = document.getElementById("dark-toggle");
+  if (toggle) {
+    toggle.addEventListener("click", () => {
+      const current = document.documentElement.getAttribute("data-theme");
+      const next    = current === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      localStorage.setItem("parlay-theme", next);
+    });
+  }
+})();
+
+// ── Chart instances ────────────────────────────────────────
+const charts = new ParlayCharts();
+let activeView = "comparison";
+
+// ── Init on load ───────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+  loadEvalResults();
+
+  // Try to fetch config from API
+  fetch("/api/training/config")
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (!data) return;
+      const baseEl  = document.getElementById("cfg-base-model");
+      const thrEl   = document.getElementById("cfg-top-threshold");
+      if (baseEl && data.base_model)         baseEl.textContent  = data.base_model;
+      if (thrEl  && data.top_threshold)      thrEl.textContent   = data.top_threshold;
+    })
+    .catch(() => {});
+});
+
+// ── Load evaluation results ────────────────────────────────
+async function loadEvalResults() {
+  try {
+    const res = await fetch("/api/training/results");
+    if (!res.ok) {
+      _useFallbackData();
+      return;
+    }
+    const data = await res.json();
+    _populateMetrics(data);
+    _initCharts(data);
+  } catch {
+    _useFallbackData();
+  }
+}
+
+function _useFallbackData() {
+  // Demo data so charts aren't empty
+  const demo = {
+    base:  { reward: 0.21, deal_rate: 0.34, zopa_eff: 0.48, tom_acc: 0.31, drift_adapt: 0.29 },
+    sft:   { reward: 0.44, deal_rate: 0.56, zopa_eff: 0.63, tom_acc: 0.52, drift_adapt: 0.51 },
+    grpo:  { reward: 0.71, deal_rate: 0.74, zopa_eff: 0.82, tom_acc: 0.69, drift_adapt: 0.73 },
+  };
+  _populateMetrics(demo);
+  _initCharts(demo);
+  _appendLog("warn", "Could not reach /api/training/results — using demo data.");
+}
+
+function _populateMetrics(data) {
+  const models = ["base", "sft", "grpo"];
+  const fields = [
+    ["reward",      "reward"],
+    ["deal-rate",   "deal_rate"],
+    ["zopa-eff",    "zopa_eff"],
+    ["tom-acc",     "tom_acc"],
+    ["drift-adapt", "drift_adapt"],
+  ];
+
+  models.forEach(m => {
+    const mData = data[m];
+    if (!mData) return;
+    fields.forEach(([htmlId, key]) => {
+      const el = document.getElementById(`${m}-${htmlId}`);
+      if (!el) return;
+      const val = mData[key];
+      if (val == null) return;
+      el.textContent = (typeof val === "number" && val < 2) ? val.toFixed(3) : val.toFixed(1);
+
+      if (m === "grpo") {
+        const sftVal = data.sft?.[key];
+        if (sftVal != null && val > sftVal) el.classList.add("positive");
+        else if (sftVal != null && val < sftVal) el.classList.add("negative");
+      }
+    });
+  });
+}
+
+function _initCharts(data) {
+  const compData = {
+    labels: ["Reward", "Deal Rate", "ZOPA Eff.", "ToM Acc.", "Drift Adapt."],
+    base:  [data.base?.reward, data.base?.deal_rate, data.base?.zopa_eff, data.base?.tom_acc, data.base?.drift_adapt],
+    sft:   [data.sft?.reward,  data.sft?.deal_rate,  data.sft?.zopa_eff,  data.sft?.tom_acc,  data.sft?.drift_adapt],
+    grpo:  [data.grpo?.reward, data.grpo?.deal_rate, data.grpo?.zopa_eff, data.grpo?.tom_acc, data.grpo?.drift_adapt],
+  };
+
+  charts.initComparisonChart("comparison-chart", compData);
+
+  charts.initLiveRewardChart("live-reward-chart");
+
+  charts.initEfficiencyRadar("radar-chart", {
+    base: compData.base,
+    grpo: compData.grpo,
+  });
+
+  // Populate live chart with training history if available
+  if (data.training_history && Array.isArray(data.training_history)) {
+    data.training_history.forEach(({ step, reward, sft_baseline }) => {
+      charts.updateLiveReward(step, reward, sft_baseline);
+    });
+  }
+}
+
+// ── Chart view switcher ────────────────────────────────────
+function switchChartView(view) {
+  activeView = view;
+  const views = ["comparison", "live", "radar"];
+  views.forEach(v => {
+    const wrap = document.getElementById(`chart-${v}-wrap`);
+    const tab  = document.getElementById(`tab-${v}`);
+    if (wrap) wrap.style.display = v === view ? "block" : "none";
+    if (tab)  tab.style.fontWeight = v === view ? "700" : "400";
+  });
+}
+
+// ── Run training via API ───────────────────────────────────
+async function runTraining() {
+  const btn    = document.getElementById("btn-run-training");
+  const status = document.getElementById("training-status-chip");
+
+  btn.disabled   = true;
+  btn.textContent = "Running…";
+  if (status) { status.textContent = "Running"; status.className = "stat-chip amber"; }
+
+  _appendLog("info", "▶ Training run requested via dashboard…");
+  _appendLog("info", "POST /api/training/run");
+
+  try {
+    const res = await fetch("/api/training/run", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stages: ["data_gen", "sft", "grpo", "evaluate"] }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    _appendLog("success", "Training pipeline started. Run ID: " + (data.run_id || "—"));
+    _appendLog("info", "Monitor progress via CLI or refresh this page.");
+
+    if (status) { status.textContent = "Running"; status.className = "stat-chip amber"; }
+
+    // Poll for progress
+    _startProgressPoll(data.run_id);
+  } catch (e) {
+    _appendLog("error", "Error: " + e.message);
+    _appendLog("warn", "Start training manually: python -m training.grpo_train");
+    if (status) { status.textContent = "Error"; status.className = "stat-chip red"; }
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = "▶ Run Training";
+  }
+}
+
+// ── Progress polling ───────────────────────────────────────
+let _pollInterval = null;
+
+function _startProgressPoll(runId) {
+  if (_pollInterval) clearInterval(_pollInterval);
+
+  _pollInterval = setInterval(async () => {
+    try {
+      const url = runId ? `/api/training/status/${runId}` : "/api/training/status";
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+
+      _updateProgress(data);
+
+      if (data.status === "complete" || data.status === "error") {
+        clearInterval(_pollInterval);
+        _pollInterval = null;
+
+        const status = document.getElementById("training-status-chip");
+        if (status) {
+          status.textContent = data.status === "complete" ? "Done" : "Error";
+          status.className   = data.status === "complete" ? "stat-chip green" : "stat-chip red";
+        }
+
+        if (data.status === "complete") {
+          _appendLog("success", "✓ Training complete. Refreshing results…");
+          setTimeout(loadEvalResults, 1000);
+        } else {
+          _appendLog("error", "Training failed: " + (data.error || "unknown error"));
+        }
+      }
+
+      // Stream live reward updates
+      if (data.step != null && data.reward != null) {
+        charts.updateLiveReward(data.step, data.reward, data.sft_baseline);
+        if (activeView !== "live") switchChartView("live");
+      }
+
+      if (data.log_line) {
+        _appendLog("info", data.log_line);
+      }
+    } catch {}
+  }, 2000);
+}
+
+function _updateProgress(data) {
+  const fill  = document.getElementById("training-progress-fill");
+  const label = document.getElementById("training-step-label");
+
+  const pct = data.progress_pct ?? 0;
+  if (fill)  fill.style.width   = `${pct}%`;
+  if (label) label.textContent  = `Step ${data.step ?? 0} / ${data.total_steps ?? "—"}`;
+}
+
+// ── Log helpers ────────────────────────────────────────────
+function _appendLog(level, text) {
+  const log = document.getElementById("training-log");
+  if (!log) return;
+
+  const line = document.createElement("span");
+  line.className = `log-line ${level}`;
+
+  const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
+  line.textContent = `[${ts}] ${text}`;
+
+  log.appendChild(document.createTextNode("\n"));
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function refreshLog() {
+  try {
+    const res = await fetch("/api/training/log?limit=50");
+    if (!res.ok) return;
+    const data = await res.json();
+    const log  = document.getElementById("training-log");
+    if (!log || !data.lines) return;
+
+    log.innerHTML = "";
+    data.lines.forEach(line => {
+      const el   = document.createElement("span");
+      el.className = "log-line " + (line.level || "");
+      el.textContent = line.text || line;
+      log.appendChild(el);
+      log.appendChild(document.createTextNode("\n"));
+    });
+    log.scrollTop = log.scrollHeight;
+  } catch {}
+}
+
+function clearLog() {
+  const log = document.getElementById("training-log");
+  if (log) {
+    log.innerHTML = "";
+    const el = document.createElement("span");
+    el.className = "log-line info";
+    el.textContent = "[ Log cleared ]";
+    log.appendChild(el);
+  }
+}
+</script>
+
+</body>
+</html>
