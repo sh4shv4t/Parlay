@@ -22,7 +22,7 @@ from game.tactical_cards import TACTICAL_CARDS, draw_hand
 from game.leaderboard import Leaderboard
 from game.achievements import AchievementSystem
 from agent.personas import PERSONAS, build_system_prompt
-from agent.gemini_client import call_gemini
+from agent.gemini_client import MODEL_ID_DEMO, call_gemini
 from agent.tom_tracker import ToMTracker
 
 logger = logging.getLogger(__name__)
@@ -301,7 +301,11 @@ async def make_move(req: MoveRequest) -> dict:
         player_text += f" [Playing card: {req.tactical_move}]"
     gemini_messages.append({"role": "user", "parts": [player_text]})
 
-    opponent_resp = await call_gemini(sess["system_prompt"], gemini_messages)
+    opponent_resp = await call_gemini(
+        sess["system_prompt"],
+        gemini_messages,
+        model=MODEL_ID_DEMO,
+    )
     opponent_utterance: str = opponent_resp.get("utterance", "Let me think about that...")
     opponent_offer: Optional[float] = opponent_resp.get("offer_amount")
 
@@ -624,6 +628,7 @@ async def session_step(session_id: str, req: SessionStepRequest) -> dict:
         sess["system_prompt"],
         gemini_messages,
         persona=sess["persona"],
+        model=MODEL_ID_DEMO,
     )
 
     sess["offer_history"].append(req.amount)

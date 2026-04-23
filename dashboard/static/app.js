@@ -1,190 +1,170 @@
 // ============================================================
 // Parlay Game Logic — app.js
 // "The Deal Room" — 3-step onboarding, mock mode, Mad Men theme.
-// Zero dependencies beyond native fetch / DOM APIs.
+// Items: 7-27 (UI fixes, deal flow, theme toggle, tooltips)
 // ============================================================
 
-const APP_DEBUG = false; // not "DEBUG" — chart.js is also a global script
-const API_BASE = "";  // same-origin
+const APP_DEBUG = false;
+const API_BASE  = "";
 
 // ── State ─────────────────────────────────────────────────────
 let gameState = {
-  sessionId:   null,
-  persona:     null,
-  scenario:    null,
-  observation: null,
-  hand:        [],
-  done:        false,
-  playerName:  "Player",
-  turnCount:   0,
-  cp:          100,
-  maxCp:       100,
+  sessionId:    null,
+  persona:      null,
+  scenario:     null,
+  scenarioData: null,  // full scenario object for briefing
+  observation:  null,
+  hand:         [],
+  done:         false,
+  playerName:   "Player",
+  turnCount:    0,
+  cp:           100,
+  maxCp:        100,
+  currentAct:   1,
+  actsCompleted: 0,
+  actTranscripts: { 1: [], 2: [], 3: [] },
+  lastPlayerOffer: null,
+  lastOpponentOffer: null,
+  pendingAiDeal:  false,   // AI has offered a deal, awaiting player response
+  stepperAmount:  145000,  // current stepper value
 };
 
-let character      = null;   // NegotiatorCharacter instance
-let charts         = null;   // ParlayCharts instance
+let character      = null;
+let charts         = null;
 let _driftTimer    = null;
-let _previewChars  = {};     // PersonaPreviewCharacter instances keyed by persona id
+let _previewChars  = {};
 
-// ── Onboarding step tracking ──────────────────────────────────
 let _currentStep = 1;
 
 // ── Init ──────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
-  // Wire onboarding first so a Chart / fetch failure cannot block the wizard.
+  _restoreTheme();  // item 27 — restore saved theme on load
   _initOnboarding();
   _syncOnboardingInert();
 
   try {
-    if (typeof ParlayCharts !== "undefined") {
-      charts = new ParlayCharts();
-    }
+    if (typeof ParlayCharts !== "undefined") charts = new ParlayCharts();
   } catch (e) {
-    if (typeof console !== "undefined" && console.error) {
-      console.error("[Parlay] ParlayCharts init failed:", e);
-    }
+    if (APP_DEBUG) console.error("[Parlay] ParlayCharts init failed:", e);
   }
 
   loadScenarios();
   loadPersonas();
   _checkDemoMode();
 
-  // Game action buttons
+  // Main submit
   const submitBtn = document.getElementById("btn-submit");
   if (submitBtn) submitBtn.addEventListener("click", submitMove);
 
-  const acceptBtn = document.getElementById("btn-accept");
-  if (acceptBtn) acceptBtn.addEventListener("click", acceptDeal);
+  // Quick action chips — item 14
+  const chipAccept = document.getElementById("chip-accept");
+  if (chipAccept) chipAccept.addEventListener("click", acceptDeal);
+  const chipWalk = document.getElementById("chip-walk");
+  if (chipWalk) chipWalk.addEventListener("click", walkAway);
+  const chipOffer = document.getElementById("chip-offer");
+  if (chipOffer) chipOffer.addEventListener("click", _toggleOfferStepper);
 
-  const walkBtn = document.getElementById("btn-walk");
-  if (walkBtn) walkBtn.addEventListener("click", walkAway);
+  // Stepper controls
+  document.getElementById("stepper-down")?.addEventListener("click", () => _stepOffer(-5000));
+  document.getElementById("stepper-up")?.addEventListener("click",   () => _stepOffer(+5000));
+  document.getElementById("stepper-use")?.addEventListener("click",  _useStepperOffer);
+  document.getElementById("stepper-cancel")?.addEventListener("click", _hideOfferStepper);
 
-  const dismissDrift = document.getElementById("btn-dismiss-drift");
-  if (dismissDrift) dismissDrift.addEventListener("click", dismissDriftAlert);
+  // Briefing begin
+  document.getElementById("btn-briefing-begin")?.addEventListener("click", _dismissBriefing);
 
-  const dismissDemo = document.getElementById("btn-dismiss-demo");
-  if (dismissDemo) {
-    dismissDemo.addEventListener("click", () => {
-      const banner = document.getElementById("demo-banner");
-      if (banner) banner.classList.add("hidden");
-      document.body.classList.remove("demo-mode");
-    });
-  }
+  // Drift dismiss
+  document.getElementById("btn-dismiss-drift")?.addEventListener("click", dismissDriftAlert);
 
+  // Demo banner dismiss
+  document.getElementById("btn-dismiss-demo")?.addEventListener("click", () => {
+    document.getElementById("demo-banner")?.classList.add("hidden");
+    document.body.classList.remove("demo-mode");
+  });
+
+  // Offer input enter key
   const offerInput = document.getElementById("offer-input");
-  if (offerInput) {
-    offerInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) submitMove();
-    });
-  }
+  if (offerInput) offerInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) submitMove();
+  });
 
-  const darkToggle = document.getElementById("dark-toggle");
-  if (darkToggle) darkToggle.addEventListener("click", _toggleDisplayMode);
+  // Theme toggle — item 27
+  const themeBtn = document.getElementById("theme-toggle");
+  if (themeBtn) themeBtn.addEventListener("click", _toggleTheme);
 
   loadLeaderboard();
 });
+
+// ── Theme toggle — item 27 ─────────────────────────────────────
+function _restoreTheme() {
+  const saved = localStorage.getItem("parlay-theme") || "dark";
+  document.documentElement.setAttribute("data-theme", saved);
+  const btn = document.getElementById("theme-toggle");
+  if (btn) btn.textContent = saved === "light" ? "◑" : "●";
+}
+
+function _toggleTheme() {
+  const html = document.documentElement;
+  const isDark = html.getAttribute("data-theme") !== "light";
+  const next = isDark ? "light" : "dark";
+  html.setAttribute("data-theme", next);
+  const btn = document.getElementById("theme-toggle");
+  if (btn) btn.textContent = isDark ? "◑" : "●";
+  localStorage.setItem("parlay-theme", next);
+}
 
 // ── Demo mode detection ────────────────────────────────────────
 async function _checkDemoMode() {
   try {
     const res  = await fetch(`${API_BASE}/health`);
-    if (!res.ok) throw new Error("health check failed");
+    if (!res.ok) throw new Error("health");
     const data = await res.json();
     if (data.gemini === "mock") _showDemoBanner();
-  } catch {
-    // No backend reachable — still show demo banner
-    _showDemoBanner();
-  }
+  } catch { _showDemoBanner(); }
 }
 
 function _showDemoBanner() {
-  const banner = document.getElementById("demo-banner");
-  if (banner) banner.classList.remove("hidden");
+  document.getElementById("demo-banner")?.classList.remove("hidden");
   document.body.classList.add("demo-mode");
-  if (APP_DEBUG) console.log("[app] demo mode active");
 }
 
-// ── Display mode toggle (replacing dark-mode concept) ─────────
-function _toggleDisplayMode() {
-  const html = document.documentElement;
-  const cur  = html.getAttribute("data-theme") || "felt";
-  const next = cur === "felt" ? "light" : "felt";
-  html.setAttribute("data-theme", next);
-  localStorage.setItem("parlay-theme", next);
-}
-
-// ── Onboarding (3-step wizard) ────────────────────────────────
+// ── Onboarding ────────────────────────────────────────────────
 function _initOnboarding() {
-  // Step 1 — name
-  const step1Input    = document.getElementById("step1-name");
-  const step1Continue = document.getElementById("step1-continue");
-
-  if (step1Input) {
-    step1Input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") _goToStep(2);
-    });
-  }
-  if (step1Continue) step1Continue.addEventListener("click", () => _goToStep(2));
-
-  // Step 2 — scenario
-  const step2Back     = document.getElementById("step2-back");
-  const step2Continue = document.getElementById("step2-continue");
-  if (step2Back)     step2Back.addEventListener("click",     () => _goToStep(1));
-  if (step2Continue) step2Continue.addEventListener("click", () => _goToStep(3));
-
-  // Step 3 — persona
-  const step3Back  = document.getElementById("step3-back");
-  const step3Start = document.getElementById("step3-start");
-  if (step3Back)  step3Back.addEventListener("click",  () => _goToStep(2));
-  if (step3Start) step3Start.addEventListener("click", _handleStep3Start);
+  document.getElementById("step1-name")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") _goToStep(2);
+  });
+  document.getElementById("step1-continue")?.addEventListener("click", () => _goToStep(2));
+  document.getElementById("step2-back")?.addEventListener("click",     () => _goToStep(1));
+  document.getElementById("step2-continue")?.addEventListener("click", () => _goToStep(3));
+  document.getElementById("step3-back")?.addEventListener("click",     () => _goToStep(2));
+  document.getElementById("step3-start")?.addEventListener("click",    _handleStep3Start);
 }
 
-/**
- * Inert hides non-active steps from the accessibility tree and blocks interaction
- * in modern browsers, complementing z-index and pointer-events.
- */
 function _syncOnboardingInert() {
-  for (let n = 1; n <= 3; n += 1) {
+  for (let n = 1; n <= 3; n++) {
     const el = document.getElementById(`onboarding-step-${n}`);
     if (!el) continue;
-    if (n === _currentStep) {
-      el.removeAttribute("inert");
-    } else {
-      el.setAttribute("inert", "");
-    }
+    n === _currentStep ? el.removeAttribute("inert") : el.setAttribute("inert", "");
   }
 }
 
 function _goToStep(step) {
-  if (APP_DEBUG) console.log("[app] going to step", step);
-
-  // Validate before advancing
   if (step === 2) {
     const name = (document.getElementById("step1-name")?.value ?? "").trim();
-    if (!name) {
-      _showStepError(1, "Please enter your name.");
-      return;
-    }
+    if (!name) { _showStepError(1, "Please enter your name."); return; }
     _showStepError(1, "");
   }
-
   if (step === 3) {
     const sel = document.querySelector(".scenario-dossier.selected");
-    if (!sel) {
-      _showStepError(2, "Please select a scenario.");
-      return;
-    }
+    if (!sel) { _showStepError(2, "Please select a scenario."); return; }
     _showStepError(2, "");
   }
 
-  // Exit current step
   const currentEl = document.getElementById(`onboarding-step-${_currentStep}`);
   if (currentEl) {
     currentEl.classList.remove("active", "start-active");
     currentEl.classList.add("exiting");
-    setTimeout(() => {
-      currentEl.classList.remove("exiting");
-    }, 300);
+    setTimeout(() => currentEl.classList.remove("exiting"), 300);
   }
 
   _currentStep = step;
@@ -193,11 +173,7 @@ function _goToStep(step) {
   const nextEl = document.getElementById(`onboarding-step-${step}`);
   if (nextEl) {
     nextEl.classList.remove("exiting");
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        nextEl.classList.add("active");
-      });
-    });
+    requestAnimationFrame(() => requestAnimationFrame(() => nextEl.classList.add("active")));
   }
 }
 
@@ -205,9 +181,7 @@ function _showStepError(step, msg) {
   const el = document.getElementById(`step${step}-error`);
   if (!el) return;
   el.textContent = msg;
-  if (msg) {
-    setTimeout(() => { el.textContent = ""; }, 3000);
-  }
+  if (msg) setTimeout(() => { el.textContent = ""; }, 3000);
 }
 
 function _closeOnboarding() {
@@ -222,14 +196,11 @@ function _closeOnboarding() {
 }
 
 function _handleStep3Start() {
-  const nameInput = document.getElementById("step1-name");
+  const nameInput   = document.getElementById("step1-name");
   const selScenario = document.querySelector(".scenario-dossier.selected");
   const selPersona  = document.querySelector(".persona-card-option.selected");
 
-  if (!selPersona) {
-    _showStepError(3, "Please choose an opponent.");
-    return;
-  }
+  if (!selPersona) { _showStepError(3, "Please choose an opponent."); return; }
 
   const name       = nameInput?.value.trim() || "Player";
   const scenarioId = selScenario?.dataset.scenarioId || "saas_enterprise";
@@ -246,18 +217,21 @@ async function startGame(scenarioId, persona, playerName) {
   gameState.playerName = playerName;
   gameState.done       = false;
   gameState.turnCount  = 0;
+  gameState.currentAct = 1;
+  gameState.actsCompleted = 0;
+  gameState.lastPlayerOffer   = null;
+  gameState.lastOpponentOffer = null;
+  gameState.pendingAiDeal = false;
 
   try {
     const res = await fetch(`${API_BASE}/api/game/start`, {
-      method:  "POST",
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scenario_id: scenarioId, persona, player_name: playerName }),
     });
 
     let data;
     if (!res.ok) {
-      // If backend is down, load with mock data
-      if (APP_DEBUG) console.log("[app] backend down — using mock data");
       data = _mockStartData(scenarioId, persona, playerName);
       _showDemoBanner();
     } else {
@@ -269,6 +243,7 @@ async function startGame(scenarioId, persona, playerName) {
     gameState.hand        = data.hand || [];
     gameState.cp          = data.cp   ?? data.observation?.credibility_points ?? 100;
     gameState.maxCp       = data.max_cp ?? 100;
+    gameState.scenarioData = data.scenario || null;
 
     _closeOnboarding();
     _destroyPreviewChars();
@@ -277,99 +252,167 @@ async function startGame(scenarioId, persona, playerName) {
     _initSparkline(data.observation);
     _updateScenarioHeader(data);
     _updatePersonaPanel(data);
+    _updateNameplate(data);
 
-    addMessage("system", `Game started. You are negotiating as the ${_personaLabel(persona)}.`);
-    const opener = data.opening_message || data.persona?.opening_line;
-    if (opener) {
-      addMessage("opponent", opener, data.observation?.opponent_offer ?? null, null);
-    }
+    // Show deal briefing — item 15
+    _showBriefing(data);
 
     if (APP_DEBUG) console.log("[app] game started", data);
   } catch (e) {
-    // Backend completely unreachable — use mock data
-    if (APP_DEBUG) console.log("[app] startGame error, falling back to mock:", e);
+    if (APP_DEBUG) console.error("[app] startGame error:", e);
     const data = _mockStartData(scenarioId, persona, playerName);
     gameState.sessionId   = data.session_id;
     gameState.observation = data.observation;
     gameState.hand        = data.hand;
     gameState.cp          = 100;
+    gameState.scenarioData = data.scenario;
 
     _closeOnboarding();
     _destroyPreviewChars();
     updateUI(data);
     _initCharacter(persona);
     _showDemoBanner();
-    addMessage("system", `Demo mode: running mock game for ${_personaLabel(persona)}.`);
+    _showBriefing(data);
   } finally {
     setLoading(false);
   }
 }
 
+// ── Deal Briefing — item 15 ────────────────────────────────────
+function _showBriefing(data) {
+  const overlay = document.getElementById("briefing-overlay");
+  if (!overlay) return;
+
+  const sc = data.scenario || {};
+  const obs = data.observation || {};
+
+  const zopaLo = obs.zopa_lower ?? sc.zopa_lower ?? 125000;
+  const zopaHi = obs.zopa_upper ?? sc.zopa_upper ?? 165000;
+  const scenarioId = sc.id || gameState.scenario || "";
+  const caseNum = scenarioId.replace(/_/g, "-").toUpperCase();
+
+  const _s = (v) => formatCurrency(v, "USD");
+
+  const caseNumEl = document.getElementById("briefing-case-num");
+  const titleEl   = document.getElementById("briefing-title");
+  const goalEl    = document.getElementById("briefing-your-goal");
+  const theirEl   = document.getElementById("briefing-their-goal");
+  const rangeEl   = document.getElementById("briefing-range");
+
+  if (caseNumEl) caseNumEl.textContent = `CASE FILE #${caseNum || "001"}`;
+  if (titleEl)   titleEl.textContent   = sc.title || "Negotiation";
+  if (goalEl)    goalEl.textContent    = `Close the deal above ${_s(zopaLo)}. Your ideal: ${_s(zopaHi)}.`;
+  if (theirEl)   theirEl.textContent   = `Pay as little as possible. They'll push hard on price from around ${_s(zopaLo)}.`;
+  if (rangeEl)   rangeEl.textContent   = `A deal is possible between ${_s(zopaLo)} and ${_s(zopaHi)}.`;
+
+  // Initialize stepper at midpoint
+  gameState.stepperAmount = Math.round((zopaLo + zopaHi) / 2 / 1000) * 1000;
+  _updateStepperDisplay();
+
+  overlay.style.display = "flex";
+}
+
+function _dismissBriefing() {
+  const overlay = document.getElementById("briefing-overlay");
+  if (overlay) overlay.style.display = "none";
+
+  // Enable inputs
+  _setInputsDisabled(false);
+
+  // Post system message and AI opening — item 7
+  const thread = document.getElementById("chat-thread");
+  if (thread) {
+    // Clear placeholder
+    const existing = thread.querySelector(".system-msg");
+    if (existing) existing.remove();
+  }
+  addMessage("system", `Game started. You are negotiating as ${_personaLabel(gameState.persona)}.`);
+
+  // Load AI opening
+  const opener = gameState.observation?.opening_message
+              || gameState._pendingOpener;
+  if (opener) {
+    addMessage("opponent", opener, gameState.observation?.opponent_offer ?? null, null);
+  } else {
+    // In mock mode, add a default opener
+    const persona = gameState.persona || "shark";
+    const mockOpeners = {
+      shark:    "Let's not waste each other's time. What's your opening number?",
+      diplomat: "I believe we can find a solution that works for both of us. Shall we begin?",
+      analyst:  "I've reviewed the market data. Let's start with the numbers.",
+      wildcard: "You know what, I feel good about today. Let's just see where this goes.",
+      veteran:  "I've been in rooms like this before. Let's get to it.",
+    };
+    addMessage("opponent", mockOpeners[persona] || "Let's begin.", null, null);
+  }
+}
+
 function _mockStartData(scenarioId, persona, playerName) {
   const mockScenarios = {
-    saas_enterprise:        { title: "Enterprise SaaS Contract",   lower: 125000, upper: 165000 },
-    consulting_retainer:    { title: "Consulting Retainer",        lower: 25000,  upper: 40000  },
-    hiring_package:         { title: "Senior Engineer Offer",      lower: 195000, upper: 230000 },
-    vendor_hardware:        { title: "Hardware Vendor Contract",   lower: 1750000,upper: 2200000},
-    acquisition_term_sheet: { title: "Startup Acquisition",        lower: 10500000,upper:16000000},
+    saas_enterprise:        { id: "saas_enterprise",        title: "Enterprise SaaS Contract",   zopa_lower: 125000,   zopa_upper: 165000   },
+    consulting_retainer:    { id: "consulting_retainer",    title: "Consulting Retainer",         zopa_lower: 25000,    zopa_upper: 40000    },
+    hiring_package:         { id: "hiring_package",         title: "Senior Engineer Offer",       zopa_lower: 195000,   zopa_upper: 230000   },
+    vendor_hardware:        { id: "vendor_hardware",        title: "Hardware Vendor Contract",    zopa_lower: 1750000,  zopa_upper: 2200000  },
+    acquisition_term_sheet: { id: "acquisition_term_sheet", title: "Startup Acquisition",         zopa_lower: 10500000, zopa_upper: 16000000 },
   };
   const s = mockScenarios[scenarioId] || mockScenarios.saas_enterprise;
-  const nash = (s.lower + s.upper) / 2;
+  const nash = (s.zopa_lower + s.zopa_upper) / 2;
   const sid  = "mock-" + Math.random().toString(36).slice(2);
 
   return {
     session_id: sid,
-    scenario: { id: scenarioId, title: s.title },
+    scenario: s,
     observation: {
-      step_count: 0, zopa_lower: s.lower, zopa_upper: s.upper,
+      step_count: 0, zopa_lower: s.zopa_lower, zopa_upper: s.zopa_upper,
       nash_point: nash, tension_score: 10, credibility_points: 100, act: 1,
-      belief_state: { cooperative: 0.5, competitive: 0.3, reservation: 0.4, flexibility: 0.6 },
+      belief_state: { cooperative: 0.5, competitive: 0.5,
+                      reservation: s.zopa_lower / s.zopa_upper, flexibility: 0.5 },
     },
-    persona: { id: persona, name: _personaLabel(persona), symbol: "◈", emoji: "🎯",
-               opening_line: "Let's see what you've got." },
+    persona: { id: persona, name: _personaLabel(persona), symbol: _personaSymbol(persona), emoji: "◈" },
     hand: [],
-    opening_message: "Welcome to the room. Let's negotiate.",
-    cp: 100,
-    max_cp: 100,
+    opening_message: null,
+    cp: 100, max_cp: 100,
   };
 }
 
+// ── Submit move ────────────────────────────────────────────────
 async function submitMove() {
-  if (gameState.done) return;
-  if (!gameState.sessionId) return;
+  if (gameState.done || !gameState.sessionId) return;
 
   const offerInput = document.getElementById("offer-input");
-  const moveSelect = document.getElementById("move-select");
-  const cardEl     = document.querySelector(".tactical-card.selected");
+  const cardEl     = document.querySelector(".tactic-chip.selected");
 
-  const offerRaw = offerInput?.value.trim() ?? "";
-  const move     = moveSelect?.value ?? "counter";
-  const cardId   = cardEl?.dataset.cardId ?? null;
-  const offer    = offerRaw ? parseFloat(offerRaw.replace(/[$,]/g, "")) : null;
+  const raw    = offerInput?.value.trim() ?? "";
+  const cardId = cardEl?.dataset.cardId ?? null;
+  const offer  = raw ? parseFloat(raw.replace(/[$,]/g, "")) : null;
 
-  if (offer === null && move === "counter") {
-    offerInput && offerInput.focus();
-    return;
-  }
   if (offer !== null && isNaN(offer)) return;
 
-  addMessage("player", _moveSummary(move, offer), offer, move);
+  // Build message text
+  const msgText = offer != null
+    ? `Counter offer: ${formatCurrency(offer, "USD")}.`
+    : raw || "Let me think about that.";
+
+  if (offer != null) gameState.lastPlayerOffer = offer;
+
+  addMessage("player", msgText, offer, cardId ? cardId : null);
   const thinkId = _showThinkingBubble();
   setLoading(true);
 
   try {
     const res = await fetch(`${API_BASE}/api/game/step`, {
-      method:  "POST",
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         session_id: gameState.sessionId,
-        move,
+        move: offer ? "counter" : "chat",
         offer_amount: offer,
         card_id: cardId,
+        message: raw,
       }),
     });
 
-    const data = res.ok ? await res.json() : _mockStepData(offer, move);
+    const data = res.ok ? await res.json() : _mockStepData(offer, "counter");
 
     gameState.observation = data.observation;
     gameState.done        = data.done ?? false;
@@ -380,67 +423,170 @@ async function submitMove() {
     _removeThinkingBubble(thinkId);
     updateUI(data);
 
-    // Opponent message from /api/game/step unified endpoint response format
-    const oppMsg  = data.opponent_message ?? data.opponent?.utterance;
-    const oppOffer = data.observation?.opponent_offer ?? data.opponent?.offer;
-    const oppMove  = data.opponent_move ?? data.opponent?.tactical_move;
+    const oppMsg   = data.opponent_message ?? data.opponent?.utterance;
+    const oppOffer = data.observation?.opponent_offer ?? data.opponent?.offer ?? null;
+    const oppMove  = data.opponent_move ?? data.opponent?.tactical_move ?? null;
+
+    if (oppOffer != null) gameState.lastOpponentOffer = oppOffer;
+
     if (oppMsg) {
-      const bubble = addMessage("opponent", oppMsg, oppOffer, oppMove);
-      if (bubble && gameState.persona) {
-        bubble.setAttribute("data-persona", gameState.persona);
+      // Check if AI is offering a deal close — item 22
+      const aiClose = _checkAiDealClose(oppOffer, oppMsg, data);
+      if (aiClose) {
+        _showAiDealOffer(oppMsg, oppOffer);
+      } else {
+        const bubble = addMessage("opponent", oppMsg, oppOffer, oppMove);
+        if (bubble && gameState.persona) bubble.setAttribute("data-persona", gameState.persona);
       }
     }
+
+    // Update character from game state — item 31
+    if (data.observation) updateCharacterFromGameState(data.observation);
 
     if (gameState.done) _handleGameOver(data);
 
     if (offerInput) offerInput.value = "";
-    if (cardEl) cardEl.classList.remove("selected");
+    cardEl?.classList.remove("selected");
+    _renderTacticChips(gameState.hand);
 
-    if (APP_DEBUG) console.log("[app] step result", data);
   } catch (e) {
     _removeThinkingBubble(thinkId);
     _showError("Move failed: " + e.message);
-    if (APP_DEBUG) console.log("[app] submitMove error", e);
   } finally {
     setLoading(false);
   }
 }
 
 function _mockStepData(offer, move) {
-  gameState.turnCount += 1;
-  const obs = gameState.observation || {};
-  const tension = Math.min(100, (obs.tension_score || 10) + 5);
+  const obs  = gameState.observation || {};
+  const tens = Math.min(100, (obs.tension_score || 10) + 7);
+  const mockOffer = offer ? Math.round(offer * 0.97) : null;
+  if (mockOffer) gameState.lastOpponentOffer = mockOffer;
   return {
-    observation: { ...obs, tension_score: tension, step_count: (obs.step_count || 0) + 1 },
-    opponent_message: "That's an interesting position. Let me consider it.",
-    opponent: { utterance: "That's an interesting position. Let me consider it.", offer: null },
+    observation: { ...obs, tension_score: tens, step_count: (obs.step_count || 0) + 1,
+                   opponent_offer: mockOffer },
+    opponent_message: "That's an interesting position. Here's my counter.",
+    opponent: { utterance: "That's an interesting position. Here's my counter.", offer: mockOffer },
     done: false,
   };
 }
 
+// ── AI deal close detection — item 22 ─────────────────────────
+function _checkAiDealClose(oppOffer, oppMsg, data) {
+  if (!oppOffer || !gameState.lastPlayerOffer) return false;
+  const diff = Math.abs(oppOffer - gameState.lastPlayerOffer);
+  const pct  = diff / Math.max(gameState.lastPlayerOffer, 1);
+  if (pct < 0.03 && Math.random() < 0.30) return true;
+
+  // High tension walk-away check
+  const tension = data.observation?.tension_score ?? 0;
+  const cumRew  = data.observation?.cumulative_reward ?? 0;
+  if (tension >= 90 && cumRew < -30 && Math.random() < 0.20) {
+    _showAiWalkAway();
+    return true;
+  }
+
+  return false;
+}
+
+function _showAiDealOffer(msg, offer) {
+  const thread = document.getElementById("chat-thread");
+  if (!thread) return;
+
+  // Gold-bordered bubble — item 22
+  const bubble = document.createElement("div");
+  bubble.className = `message-bubble opponent deal-offer`;
+  if (gameState.persona) bubble.setAttribute("data-persona", gameState.persona);
+
+  const meta = document.createElement("div");
+  meta.className = "bubble-meta";
+  const nameSpan = document.createElement("span");
+  nameSpan.textContent = "Opponent";
+  meta.appendChild(nameSpan);
+  const pill = document.createElement("span");
+  pill.className = "move-pill";
+  pill.textContent = "◈ Deal offered";
+  meta.appendChild(pill);
+
+  const body = document.createElement("div");
+  body.className = "bubble-body";
+  body.textContent = msg || "Deal — let's close this.";
+
+  if (offer != null && !isNaN(offer)) {
+    const chip = document.createElement("div");
+    chip.className = "offer-chip";
+    chip.textContent = formatCurrency(offer, "USD");
+    body.appendChild(chip);
+  }
+
+  // Accept / Counter buttons
+  const actions = document.createElement("div");
+  actions.className = "ai-deal-prompt";
+  const acceptBtn = document.createElement("button");
+  acceptBtn.className = "ai-deal-btn accept";
+  acceptBtn.textContent = "Accept ✓";
+  acceptBtn.onclick = () => acceptDeal();
+  const counterBtn = document.createElement("button");
+  counterBtn.className = "ai-deal-btn counter";
+  counterBtn.textContent = "Counter";
+  counterBtn.onclick = () => { actions.remove(); };
+
+  actions.appendChild(acceptBtn);
+  actions.appendChild(counterBtn);
+
+  bubble.appendChild(meta);
+  bubble.appendChild(body);
+  bubble.appendChild(actions);
+  thread.appendChild(bubble);
+  _scrollThread(thread);
+
+  gameState.pendingAiDeal = true;
+}
+
+function _showAiWalkAway() {
+  const walkMsg = "I'm afraid we're too far apart. I'm walking away.";
+  addMessage("opponent", walkMsg, null, null);
+  setTimeout(() => _triggerWalkAwayModal(false), 800);
+}
+
+// ── Accept Deal — item 21 ──────────────────────────────────────
 async function acceptDeal() {
   if (gameState.done || !gameState.sessionId) return;
-  const offerInput = document.getElementById("offer-input");
-  const offer = offerInput ? parseFloat(offerInput.value.replace(/[$,]/g, "")) : null;
 
-  addMessage("player", "I accept the deal.", offer, "accept");
+  // Validate: must have an offer on the table
+  if (!gameState.lastPlayerOffer && !gameState.lastOpponentOffer) {
+    _showInlineWarning("Make an offer first before accepting.");
+    return;
+  }
+
+  const dealAmount = gameState.lastOpponentOffer || gameState.lastPlayerOffer;
+
+  addMessage("player", "I accept the deal.", dealAmount, "accept");
   const thinkId = _showThinkingBubble();
   setLoading(true);
 
   try {
     const res = await fetch(`${API_BASE}/api/game/accept`, {
-      method:  "POST",
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: gameState.sessionId }),
     });
+    const data = res.ok ? await res.json() : { deal_reached: true, deal_amount: dealAmount, reward: 0 };
 
-    const data = res.ok ? await res.json() : { deal_reached: true, deal_amount: offer, reward: 0 };
     _removeThinkingBubble(thinkId);
     gameState.done = true;
     updateUI(data);
-    addMessage("system", "Deal accepted.");
-    _handleGameOver({ ...data, deal_reached: true, deal_amount: offer ?? data.final_price });
-    if (APP_DEBUG) console.log("[app] acceptDeal", data);
+
+    const obs = data.observation || gameState.observation || {};
+    const finalPrice = data.final_price ?? data.deal_amount ?? dealAmount;
+    const act = gameState.currentAct;
+
+    // If not final act, show act transition — item 21
+    if (act < 3) {
+      _showActTransition(act, finalPrice, obs);
+    } else {
+      _handleGameOver({ ...data, deal_reached: true, deal_amount: finalPrice });
+    }
   } catch (e) {
     _removeThinkingBubble(thinkId);
     _showError(e.message);
@@ -449,6 +595,96 @@ async function acceptDeal() {
   }
 }
 
+// ── Act Transition Modal — item 21 ────────────────────────────
+function _showActTransition(act, price, obs) {
+  const zopaLo = obs.zopa_lower ?? 125000;
+  const zopaHi = obs.zopa_upper ?? 165000;
+  const zopaWidth = Math.max(1, zopaHi - zopaLo);
+  const efficiency = price ? Math.max(0, Math.min(1, (price - zopaLo) / zopaWidth)) : 0;
+  const captured = price ? Math.round(price - zopaLo) : 0;
+  const available = Math.round(zopaWidth);
+  const nash = (zopaLo + zopaHi) / 2;
+  const nashDiff = price ? Math.abs(price - nash) / nash : 1;
+  const nashNote = nashDiff < 0.05 ? "You nailed it." : nashDiff < 0.15 ? "Close to optimal." : "Room to improve next time.";
+
+  const overlay = document.createElement("div");
+  overlay.className = "act-modal-overlay";
+  overlay.id = "act-modal";
+
+  overlay.innerHTML = `
+    <div class="act-modal-card" role="dialog" aria-label="Act ${act} complete">
+      <div class="act-modal-title">ACT ${['I','II','III'][act-1]} COMPLETE</div>
+      <div class="act-modal-price">${formatCurrency(price, "USD")}</div>
+      <div class="act-modal-eff">
+        <div class="act-modal-eff-label">Efficiency: ${Math.round(efficiency * 100)}%</div>
+        <div class="act-modal-eff-track">
+          <div class="act-modal-eff-fill" style="width:0%;"></div>
+        </div>
+      </div>
+      <div class="act-modal-caption">
+        You captured ${formatCurrency(captured, "USD")} of the
+        ${formatCurrency(available, "USD")} available.
+      </div>
+      <div class="act-modal-nash">Nash optimal was ${formatCurrency(nash, "USD")}. ${nashNote}</div>
+      <button class="act-modal-btn" type="button">Continue to Act ${['II','III'][act-1] || 'End'}: ${['Terms →','Coalition →'][act-1] || '→'}</button>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  // Animate efficiency bar
+  requestAnimationFrame(() => {
+    const fill = overlay.querySelector(".act-modal-eff-fill");
+    if (fill) fill.style.width = `${Math.round(efficiency * 100)}%`;
+  });
+
+  overlay.querySelector(".act-modal-btn").onclick = () => {
+    overlay.remove();
+    _advanceAct(act + 1, price);
+  };
+}
+
+function _advanceAct(nextAct, priceFromPrev) {
+  gameState.currentAct = nextAct;
+  gameState.actsCompleted = nextAct - 1;
+  gameState.done = false;
+  gameState.lastPlayerOffer = null;
+  gameState.lastOpponentOffer = null;
+
+  _updateActPills(nextAct);
+
+  if (nextAct === 2) {
+    addMessage("system", `Act II — Terms. Price locked at ${formatCurrency(priceFromPrev, "USD")}. Now negotiate the package.`);
+    _showActIIBriefing(priceFromPrev);
+  } else if (nextAct === 3) {
+    addMessage("system", "Act III — Coalition. A third party has entered the room.");
+    _showActIIIIntro();
+  } else {
+    // Game over
+    _handleGameOver({ deal_reached: true, deal_amount: priceFromPrev, reward: 0 });
+  }
+
+  _setInputsDisabled(false);
+}
+
+// ── Act II Briefing — item 24 ──────────────────────────────────
+function _showActIIBriefing(lockedPrice) {
+  addMessage("opponent", `Price is locked at ${formatCurrency(lockedPrice, "USD")}. Now let's talk about the terms — payment schedule, SLA, and contract length.`, null, null);
+}
+
+// ── Act III Intro — item 25 ────────────────────────────────────
+function _showActIIIIntro() {
+  addMessage("system", "The Board has entered. A third party with its own interests will interject every few turns.");
+  addMessage("opponent", "I've been authorized to proceed, but The Board will have the final word on certain terms.", null, null);
+  // Board interjects every 3 turns (tracked via turnCount)
+  gameState._boardInterjectionTurns = [
+    gameState.turnCount + 3,
+    gameState.turnCount + 6,
+    gameState.turnCount + 9,
+  ];
+}
+
+// ── Walk Away — item 23 ────────────────────────────────────────
 async function walkAway() {
   if (gameState.done || !gameState.sessionId) return;
   addMessage("player", "I'm walking away from the table.", null, "walk");
@@ -457,17 +693,15 @@ async function walkAway() {
 
   try {
     const res = await fetch(`${API_BASE}/api/game/walkaway`, {
-      method:  "POST",
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: gameState.sessionId }),
     });
-
     const data = res.ok ? await res.json() : { result: "walk_away" };
     _removeThinkingBubble(thinkId);
     gameState.done = true;
     updateUI(data);
-    _handleGameOver({ deal_reached: false, reward: 0 });
-    if (APP_DEBUG) console.log("[app] walkAway", data);
+    _triggerWalkAwayModal(true, data);
   } catch (e) {
     _removeThinkingBubble(thinkId);
     _showError(e.message);
@@ -476,18 +710,132 @@ async function walkAway() {
   }
 }
 
+function _triggerWalkAwayModal(playerInitiated, data) {
+  const obs     = gameState.observation || {};
+  const zopaLo  = obs.zopa_lower ?? 125000;
+  const zopaHi  = obs.zopa_upper ?? 165000;
+  const left    = zopaHi - zopaLo;
+  const reasons = _buildWalkAwayReasons(obs, data);
+
+  const overlay = document.createElement("div");
+  overlay.className = "walk-modal-overlay";
+  overlay.id = "walk-modal";
+
+  const reasonsHtml = reasons.map(r => `<div class="walk-reason-item">${r}</div>`).join("");
+
+  overlay.innerHTML = `
+    <div class="walk-modal-card" role="dialog" aria-label="No deal">
+      <div class="walk-modal-title">No Deal</div>
+      <div class="walk-modal-sub">The negotiation collapsed.</div>
+      <div class="walk-modal-left">You left ${formatCurrency(left, "USD")} on the table.</div>
+      <div class="walk-modal-range">The deal was possible between ${formatCurrency(zopaLo,"USD")} and ${formatCurrency(zopaHi,"USD")}.</div>
+      ${reasons.length ? `<div class="walk-modal-reasons"><div class="walk-modal-reasons-label">What went wrong:</div>${reasonsHtml}</div>` : ""}
+      <div class="walk-modal-actions">
+        <button class="walk-modal-btn primary" id="walk-try-again">Try Again</button>
+        <button class="walk-modal-btn" id="walk-change-opp">Change Opponent</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  overlay.querySelector("#walk-try-again").onclick = () => {
+    overlay.remove();
+    startGame(gameState.scenario, gameState.persona, gameState.playerName);
+  };
+  overlay.querySelector("#walk-change-opp").onclick = () => {
+    overlay.remove();
+    location.reload();
+  };
+}
+
+function _buildWalkAwayReasons(obs, data) {
+  const reasons = [];
+  const tension     = obs.tension_score ?? 0;
+  const stepCount   = obs.step_count ?? 0;
+  const concRate    = data?.concession_rate ?? 0;
+  const tomAcc      = data?.tom_accuracy ?? obs.tom_accuracy ?? 1;
+  const tacticsUsed = gameState.hand && gameState.hand.length > 0;
+
+  if (concRate > 0.15) reasons.push("Too many concessions early");
+  if (tension > 80)    reasons.push(`Tension peaked at turn ${stepCount}`);
+  if (!tacticsUsed && gameState.turnCount > 3) reasons.push("No tactical moves played");
+  if (tomAcc < 0.4)    reasons.push("Misread the opponent's constraints");
+  return reasons;
+}
+
+// ── Board interject — item 25 ──────────────────────────────────
+function _checkBoardInterject() {
+  if (gameState.currentAct !== 3) return;
+  const turns = gameState._boardInterjectionTurns || [];
+  const idx = turns.indexOf(gameState.turnCount);
+  if (idx === -1) return;
+
+  const msgs = [
+    "I've been told another vendor can deliver in 4 weeks. That changes our calculus.",
+    "The budget committee approved up to the higher range — but they want delivery certainty.",
+    "The Board is watching this closely. We need to wrap this up.",
+  ];
+  const msg = msgs[idx % msgs.length];
+  setTimeout(() => {
+    addMessage("system", `◉ The Board: "${msg}"`);
+  }, 500);
+}
+
+// ── Inline warning — item 21 ───────────────────────────────────
+function _showInlineWarning(msg) {
+  const thread = document.getElementById("chat-thread");
+  if (!thread) return;
+  const div = document.createElement("div");
+  div.className = "system-msg";
+  div.style.color = "var(--scarlet-light)";
+  div.textContent = msg;
+  thread.appendChild(div);
+  _scrollThread(thread);
+  setTimeout(() => div.remove(), 3000);
+}
+
+// ── Offer Stepper — item 14 ────────────────────────────────────
+function _toggleOfferStepper() {
+  const stepper = document.getElementById("offer-stepper");
+  if (!stepper) return;
+  const visible = stepper.classList.contains("visible");
+  stepper.classList.toggle("visible", !visible);
+}
+
+function _hideOfferStepper() {
+  document.getElementById("offer-stepper")?.classList.remove("visible");
+}
+
+function _stepOffer(delta) {
+  const obs = gameState.observation || {};
+  const lo  = obs.zopa_lower ?? 0;
+  const hi  = obs.zopa_upper ?? 999999999;
+  gameState.stepperAmount = Math.max(lo, Math.min(hi, (gameState.stepperAmount || lo) + delta));
+  _updateStepperDisplay();
+}
+
+function _updateStepperDisplay() {
+  const el = document.getElementById("stepper-value");
+  if (el) el.textContent = formatCurrency(gameState.stepperAmount, "USD");
+}
+
+function _useStepperOffer() {
+  const offerInput = document.getElementById("offer-input");
+  if (offerInput) offerInput.value = String(gameState.stepperAmount);
+  _hideOfferStepper();
+  offerInput?.focus();
+}
+
+// ── Scenario/Persona loaders ───────────────────────────────────
 async function loadScenarios() {
   try {
     const res = await fetch(`${API_BASE}/api/scenarios`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    const scenarios = data.scenarios || data || [];
-    _renderScenarioDossiers(scenarios);
-    if (APP_DEBUG) console.log("[app] scenarios loaded", scenarios.length);
-  } catch (e) {
-    // Render defaults so onboarding UI isn't empty
+    _renderScenarioDossiers(data.scenarios || data || []);
+  } catch {
     _renderScenarioDossiers([]);
-    if (APP_DEBUG) console.log("[app] loadScenarios error", e);
   }
 }
 
@@ -496,12 +844,9 @@ async function loadPersonas() {
     const res = await fetch(`${API_BASE}/api/personas`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    const personas = data.personas || data || [];
-    _renderPersonaCards(personas);
-    if (APP_DEBUG) console.log("[app] personas loaded", personas.length);
-  } catch (e) {
+    _renderPersonaCards(data.personas || data || []);
+  } catch {
     _renderPersonaCards([]);
-    if (APP_DEBUG) console.log("[app] loadPersonas error", e);
   }
 }
 
@@ -511,10 +856,7 @@ async function loadLeaderboard() {
     if (!res.ok) return;
     const data = await res.json();
     renderLeaderboard(data.entries || data || []);
-    if (APP_DEBUG) console.log("[app] leaderboard loaded");
-  } catch (e) {
-    if (APP_DEBUG) console.log("[app] loadLeaderboard error", e);
-  }
+  } catch {}
 }
 
 // ── UI Updates ────────────────────────────────────────────────
@@ -525,6 +867,7 @@ function updateUI(response) {
     updateZOPABar(obs);
     updateBeliefBars(obs.belief_state || obs.beliefState);
     updateCharacterState(obs);
+    updateCharacterFromGameState(obs);  // item 31
   }
 
   const tension = obs?.tension_score ?? obs?.tension ?? 0;
@@ -534,36 +877,61 @@ function updateUI(response) {
   const drift = response.drift_event || obs?.drift_event;
   if (drift) showDriftAlert(drift);
 
-  const act = obs?.current_act ?? obs?.act ?? 1;
+  const act = obs?.current_act ?? obs?.act ?? gameState.currentAct ?? 1;
   _updateActPills(act);
 
   if (gameState.hand && gameState.hand.length > 0) {
     renderHand(gameState.hand);
+    _renderTacticChips(gameState.hand);
   }
 
-  // Sparkline update
   if (charts && obs) {
-    const playerOffer   = obs.player_offer   ?? obs.your_offer   ?? null;
+    const playerOffer   = obs.player_offer   ?? obs.your_offer  ?? null;
     const opponentOffer = obs.opponent_offer ?? null;
     if (playerOffer !== null || opponentOffer !== null) {
-      charts.updateOfferSparkline && charts.updateOfferSparkline(playerOffer, opponentOffer, gameState.turnCount);
+      charts.updateOfferSparkline?.call(charts, playerOffer, opponentOffer, gameState.turnCount);
     }
-    if (obs.belief_state) {
-      charts.updateBeliefChart && charts.updateBeliefChart(obs.belief_state);
-    }
+    if (obs.belief_state) charts.updateBeliefChart?.call(charts, obs.belief_state);
   }
 
   const achievements = response.achievements || obs?.achievements;
   if (achievements) showAchievements(achievements);
 
   const avatarEl = document.getElementById("player-avatar");
-  if (avatarEl && gameState.playerName) {
-    avatarEl.textContent = gameState.playerName.charAt(0).toUpperCase();
-  }
+  if (avatarEl && gameState.playerName) avatarEl.textContent = gameState.playerName.charAt(0).toUpperCase();
+
   const nameEl = document.getElementById("player-name-display");
   if (nameEl) nameEl.textContent = gameState.playerName;
 
   _setInputsDisabled(gameState.done);
+
+  // Board interject check — item 25
+  _checkBoardInterject();
+}
+
+// item 31 — update character from game state observation
+function updateCharacterFromGameState(obs) {
+  if (!character) return;
+  const tension   = obs?.tension_score ?? obs?.tension ?? 0;
+  const drift     = obs?.drift_event;
+  const cumReward = obs?.cumulative_reward ?? obs?.reward ?? 0;
+
+  let state = "idle";
+  if (drift)             state = "shocked";
+  else if (tension > 80) state = "aggressive";
+  else if (tension > 55) state = "thinking";
+  else if (cumReward > 15) state = "pleased";
+
+  character.setState(state);
+
+  if (drift) setTimeout(() => {
+    if (character && gameState.sessionId) character.setState("aggressive");
+  }, 2000);
+
+  const label = document.getElementById("character-state-label");
+  if (label) label.textContent = state;
+  const badge = document.querySelector(".character-state-badge");
+  if (badge) badge.textContent = state;
 }
 
 function _updateScenarioHeader(data) {
@@ -581,10 +949,29 @@ function _updatePersonaPanel(data) {
   const avatEl = document.getElementById("persona-avatar");
   if (nameEl) nameEl.textContent = p.name || _personaLabel(gameState.persona);
   if (descEl) descEl.textContent = p.style || "";
-  if (avatEl) avatEl.textContent = p.symbol || p.emoji || "◈";
+  if (avatEl) avatEl.textContent = p.symbol || p.emoji || _personaSymbol(gameState.persona);
 }
 
-// ── Message Bubbles ────────────────────────────────────────────
+function _updateNameplate(data) {
+  const p = data.persona || {};
+  const sym  = document.getElementById("nameplate-symbol");
+  const name = document.getElementById("nameplate-name");
+  const tag  = document.getElementById("nameplate-tag");
+
+  const personaId = p.id || gameState.persona || "shark";
+  const pName = p.name || _personaLabel(personaId);
+  const pSym  = p.symbol || _personaSymbol(personaId);
+  const pTag  = _personaTag(personaId);
+
+  if (sym) {
+    sym.textContent  = pSym;
+    sym.style.color  = _personaColor(personaId);
+  }
+  if (name) name.textContent = pName;
+  if (tag)  tag.textContent  = pTag;
+}
+
+// ── Message Bubbles — item 7 (system-msg fix) ─────────────────
 function addMessage(role, text, offer, move) {
   const thread = document.getElementById("chat-thread");
   if (!thread) return null;
@@ -592,9 +979,10 @@ function addMessage(role, text, offer, move) {
   const existing = thread.querySelector(".thinking-bubble");
   if (existing) existing.remove();
 
+  // System messages — item 7: use .system-msg, no blue highlight
   if (role === "system") {
     const sys = document.createElement("div");
-    sys.className = "message-system";
+    sys.className = "system-msg";
     sys.textContent = text;
     thread.appendChild(sys);
     _scrollThread(thread);
@@ -609,7 +997,6 @@ function addMessage(role, text, offer, move) {
 
   const meta = document.createElement("div");
   meta.className = "bubble-meta";
-
   const nameSpan = document.createElement("span");
   nameSpan.textContent = role === "player" ? gameState.playerName : "Opponent";
   meta.appendChild(nameSpan);
@@ -635,6 +1022,12 @@ function addMessage(role, text, offer, move) {
   bubble.appendChild(meta);
   bubble.appendChild(body);
   thread.appendChild(bubble);
+
+  // Save to act transcript — item 26
+  const actKey = gameState.currentAct;
+  if (!gameState.actTranscripts[actKey]) gameState.actTranscripts[actKey] = [];
+  gameState.actTranscripts[actKey].push({ role, text, offer, move });
+
   _scrollThread(thread);
   return bubble;
 }
@@ -642,18 +1035,13 @@ function addMessage(role, text, offer, move) {
 function _showThinkingBubble() {
   const thread = document.getElementById("chat-thread");
   if (!thread) return null;
-
   const id   = "thinking-" + Date.now();
   const wrap = document.createElement("div");
-  wrap.className = "thinking-bubble";
-  wrap.id = id;
-
+  wrap.className = "thinking-bubble"; wrap.id = id;
   for (let i = 0; i < 3; i++) {
     const dot = document.createElement("div");
-    dot.className = "thinking-dot";
-    wrap.appendChild(dot);
+    dot.className = "thinking-dot"; wrap.appendChild(dot);
   }
-
   thread.appendChild(wrap);
   _scrollThread(thread);
   return id;
@@ -661,22 +1049,54 @@ function _showThinkingBubble() {
 
 function _removeThinkingBubble(id) {
   if (!id) return;
-  const el = document.getElementById(id);
-  if (el) el.remove();
+  document.getElementById(id)?.remove();
 }
 
 function _scrollThread(thread) {
   requestAnimationFrame(() => { thread.scrollTop = thread.scrollHeight; });
 }
 
-// ── ZOPA Bar ──────────────────────────────────────────────────
+// ── Tactic chips row — item 14 ─────────────────────────────────
+function _renderTacticChips(hand) {
+  const row = document.getElementById("tactic-chips-row");
+  if (!row) return;
+  row.innerHTML = "";
+
+  if (!hand || !hand.length) return;
+
+  hand.forEach(card => {
+    const chip = document.createElement("button");
+    chip.className = "tactic-chip";
+    chip.dataset.cardId = card.id || card.card_id || card.move || "";
+    chip.type = "button";
+
+    const costDiv = document.createElement("span");
+    costDiv.className = "tactic-chip-cost";
+    costDiv.textContent = String(card.cp_cost ?? card.cost ?? "?");
+    chip.appendChild(costDiv);
+
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = card.name || card.move || "Tactic";
+    chip.appendChild(labelSpan);
+
+    chip.addEventListener("click", () => {
+      row.querySelectorAll(".tactic-chip").forEach(c => c.classList.remove("selected"));
+      chip.classList.toggle("selected");
+    });
+
+    row.appendChild(chip);
+  });
+}
+
+// ── ZOPA Bar — item 10 ─────────────────────────────────────────
 function updateZOPABar(observation) {
   const track = document.getElementById("zopa-track");
   if (!track) return;
 
   const batnaPlayer   = observation.player_batna   ?? observation.your_batna   ?? observation.zopa_lower  ?? 0;
   const batnaOpponent = observation.opponent_batna ?? observation.opp_batna    ?? observation.zopa_upper  ?? 100;
-  const currentOffer  = observation.opponent_offer ?? observation.player_offer  ?? null;
+  const playerOffer   = observation.player_offer   ?? observation.your_offer   ?? null;
+  const opponentOffer = observation.opponent_offer ?? null;
   const nash          = observation.nash_point     ?? null;
 
   const minVal = Math.min(batnaPlayer, batnaOpponent) * 0.9;
@@ -698,16 +1118,21 @@ function updateZOPABar(observation) {
   const mOpponent = document.getElementById("marker-opponent");
   if (mOpponent) mOpponent.style.left = pct(batnaOpponent);
 
+  // Your offer marker
   const mCurrent = document.getElementById("marker-current");
-  if (mCurrent && currentOffer != null) {
-    mCurrent.style.left    = pct(currentOffer);
-    mCurrent.style.display = "flex";
+  if (mCurrent) {
+    const currentOffer = playerOffer ?? opponentOffer;
+    if (currentOffer != null) {
+      mCurrent.style.left    = pct(currentOffer);
+      mCurrent.style.display = "flex";
+    }
   }
 
-  const nashEl = document.getElementById("nash-diamond");
-  if (nashEl && nash != null) {
-    nashEl.style.left    = pct(nash);
-    nashEl.style.display = "block";
+  // Nash — always visible when known
+  const nashMarker = document.getElementById("nash-marker");
+  if (nashMarker && nash != null) {
+    nashMarker.style.left    = pct(nash);
+    nashMarker.style.display = "block";
   }
 
   const lblLow  = document.getElementById("zopa-label-low");
@@ -716,39 +1141,44 @@ function updateZOPABar(observation) {
   if (lblHigh) lblHigh.textContent = formatCurrency(maxVal, "USD");
 }
 
-// ── Tension Meter ─────────────────────────────────────────────
+// ── Tension Meter — item 12 ────────────────────────────────────
 function updateTensionMeter(tensionScore) {
   const fill  = document.getElementById("tension-fill");
   const value = document.getElementById("tension-value");
+  const desc  = document.getElementById("tension-descriptor");
   if (!fill) return;
 
-  // tensionScore arrives as 0–100 from the server
   const pct = Math.max(0, Math.min(100, tensionScore || 0));
   fill.style.width = `${pct}%`;
 
   let level = "low";
-  if (pct >= 75)      level = "high";
-  else if (pct >= 50) level = "medium";
+  let word  = "Calm";
+  if (pct >= 85)      { level = "high";   word = "Critical"; }
+  else if (pct >= 70) { level = "high";   word = "Intense";  }
+  else if (pct >= 55) { level = "medium"; word = "Heated";   }
+  else if (pct >= 35) { level = "medium"; word = "Warming";  }
 
   fill.setAttribute("data-level", level);
 
-  if (value) {
-    value.textContent = `${Math.round(pct)}%`;
-    value.style.color = level === "high"   ? "var(--parlay-red)"
-                      : level === "medium" ? "var(--parlay-amber)"
-                      : "var(--parlay-green)";
-  }
+  if (value) value.textContent = `${Math.round(pct)}%`;
+  if (desc)  desc.textContent  = `· ${word}`;
 }
 
-// ── Belief Bars ───────────────────────────────────────────────
+// ── Belief Bars — item 9 (non-zero priors) ─────────────────────
 function updateBeliefBars(beliefState) {
   if (!beliefState) return;
 
+  const obs = gameState.observation || {};
+  const zopaLo = obs.zopa_lower ?? 125000;
+  const zopaHi = obs.zopa_upper ?? 165000;
+  // Reservation prior: batna_seller / anchor * 100
+  const resPrior = zopaLo / Math.max(zopaHi, 1);
+
   const mapping = {
-    "belief-cooperative": beliefState.cooperative ?? beliefState.cooperative_prob ?? 0,
-    "belief-competitive": beliefState.competitive ?? beliefState.competitive_prob ?? 0,
-    "belief-reservation": beliefState.reservation ?? beliefState.reservation_sensitivity ?? 0,
-    "belief-flexibility": beliefState.flexibility ?? beliefState.concession_rate ?? 0,
+    "belief-cooperative": beliefState.cooperative ?? beliefState.cooperative_prob ?? 0.5,
+    "belief-competitive": beliefState.competitive ?? beliefState.competitive_prob ?? 0.5,
+    "belief-reservation": beliefState.reservation ?? beliefState.reservation_sensitivity ?? resPrior,
+    "belief-flexibility": beliefState.flexibility ?? beliefState.concession_rate ?? 0.5,
   };
 
   Object.entries(mapping).forEach(([id, val]) => {
@@ -765,7 +1195,7 @@ function updateBeliefBars(beliefState) {
     }
   });
 
-  if (charts && charts.updateBeliefChart) charts.updateBeliefChart(beliefState);
+  if (charts?.updateBeliefChart) charts.updateBeliefChart(beliefState);
 }
 
 // ── CP Bar ────────────────────────────────────────────────────
@@ -779,10 +1209,9 @@ function updateCPBar(cp) {
   if (value) value.textContent = `${Math.round(cp)} / ${maxCp}`;
 }
 
-// ── Character State ───────────────────────────────────────────
+// ── Character State ────────────────────────────────────────────
 function updateCharacterState(observation) {
   if (!character) return;
-
   const tension = observation?.tension_score ?? observation?.tension ?? 0;
   const drift   = observation?.drift_event;
 
@@ -793,52 +1222,48 @@ function updateCharacterState(observation) {
   else if (tension < 25 && gameState.turnCount > 0) state = "pleased";
 
   character.setState(state);
-
-  // After drift: revert to aggressive after 2s
   if (drift && character) {
-    setTimeout(() => {
-      if (character && gameState.sessionId) character.setState("aggressive");
-    }, 2000);
+    setTimeout(() => { if (character && gameState.sessionId) character.setState("aggressive"); }, 2000);
   }
-
-  const label = document.getElementById("character-state-label");
-  if (label) label.textContent = state;
-
-  if (APP_DEBUG) console.log("[app] character state:", state, "tension:", tension);
 }
 
 // ── Drift Alert ───────────────────────────────────────────────
 function showDriftAlert(driftEvent) {
-  const bar = document.getElementById("drift-alert");
-  if (!bar) return;
-
+  const bar  = document.getElementById("drift-alert");
   const text = document.getElementById("drift-alert-text");
+  if (!bar) return;
   if (text) {
     text.textContent = typeof driftEvent === "string"
       ? driftEvent
       : (driftEvent.description || driftEvent.event || "Market conditions have shifted.");
   }
-
   bar.classList.remove("hidden");
-
   if (_driftTimer) clearTimeout(_driftTimer);
   _driftTimer = setTimeout(dismissDriftAlert, 8000);
 }
 
 function dismissDriftAlert() {
-  const bar = document.getElementById("drift-alert");
-  if (bar) bar.classList.add("hidden");
+  document.getElementById("drift-alert")?.classList.add("hidden");
   if (_driftTimer) clearTimeout(_driftTimer);
 }
 
-// ── Hand Rendering ────────────────────────────────────────────
+// ── Hand Rendering (card cards) — item 8 (no enum strings) ────
 function renderHand(hand) {
   const container = document.getElementById("hand-container");
   if (!container) return;
-
-  container.innerHTML = "";  // safe — card definitions contain no user data
-
+  container.innerHTML = "";
   if (!hand || !hand.length) return;
+
+  // Card descriptions (plain English) — item 8
+  const CARD_DESCS = {
+    anchor_high:      "Set a bold opening number to frame the negotiation.",
+    batna_reveal:     "Reveal your walk-away option to signal credibility.",
+    coalition_invite: "Bring in a third-party ally to shift the balance.",
+    time_pressure:    "Create urgency to accelerate the opponent's decision.",
+    sweetener:        "Add a non-cash perk to make the deal more attractive.",
+    silence:          "Say nothing — let the pressure work for you.",
+    reframe:          "Change the narrative to shift negotiating ground.",
+  };
 
   hand.forEach((card) => {
     const wrapper = document.createElement("div");
@@ -848,35 +1273,38 @@ function renderHand(hand) {
     const inner = document.createElement("div");
     inner.className = "card-inner";
 
+    // Front face
     const front = document.createElement("div");
     front.className = "card-face";
 
+    const sym = document.createElement("div");
+    sym.className = "card-symbol";
+    sym.textContent = card.symbol || "◈";
+    front.appendChild(sym);
+
     const name = document.createElement("div");
     name.className = "card-name";
-    name.textContent = card.name || card.move || "Tactic";
+    name.textContent = card.name || _tidyCardName(card.move || card.id || "Tactic");
     front.appendChild(name);
 
-    const type = document.createElement("div");
-    type.className = "card-type";
-    type.textContent = card.type || card.move || "";
-    front.appendChild(type);
-
+    // Cost badge (bottom right)
     const cost = document.createElement("div");
     cost.className = "card-cost";
-    cost.textContent = `${card.cp_cost ?? card.cost ?? "—"} CP`;
+    cost.textContent = `${card.cp_cost ?? card.cost ?? "—"}`;
     front.appendChild(cost);
 
+    // Back face
     const back = document.createElement("div");
     back.className = "card-back";
-
     const backLabel = document.createElement("div");
     backLabel.className = "card-back-label";
     backLabel.textContent = "Game Theory";
     back.appendChild(backLabel);
-
     const gt = document.createElement("div");
     gt.className = "card-game-theory";
-    gt.textContent = card.game_theory_basis || card.description || "";
+    // Use plain English description — item 8 (no raw enum strings)
+    const moveKey = (card.move || card.id || "").toLowerCase();
+    gt.textContent = CARD_DESCS[moveKey] || card.game_theory_basis || card.description || "";
     back.appendChild(gt);
 
     inner.appendChild(front);
@@ -893,6 +1321,10 @@ function renderHand(hand) {
   });
 }
 
+function _tidyCardName(raw) {
+  return raw.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
 // ── Leaderboard ───────────────────────────────────────────────
 function renderLeaderboard(entries) {
   const tbody = document.getElementById("leaderboard-body");
@@ -902,11 +1334,8 @@ function renderLeaderboard(entries) {
   if (!entries || !entries.length) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 4;
-    td.className = "empty-state text-muted";
-    td.textContent = "No games yet";
-    tr.appendChild(td);
-    tbody.appendChild(tr);
+    td.colSpan = 4; td.className = "empty-state text-muted"; td.textContent = "No games yet";
+    tr.appendChild(td); tbody.appendChild(tr);
     return;
   }
 
@@ -954,11 +1383,11 @@ function showAchievements(achievements) {
 function _showToast(msg) {
   const toast = document.createElement("div");
   toast.style.cssText = [
-    "position:fixed", "bottom:24px", "right:24px", "z-index:9999",
-    "background:var(--mahogany)", "border:1px solid var(--gold)",
-    "border-radius:6px", "padding:12px 20px",
-    "font-family:var(--font-display)", "font-style:italic",
-    "font-size:0.9rem", "color:var(--cream)",
+    "position:fixed","bottom:24px","right:24px","z-index:9999",
+    "background:var(--mahogany)","border:1px solid var(--gold)",
+    "border-radius:6px","padding:12px 20px",
+    "font-family:var(--font-display)","font-style:italic",
+    "font-size:0.9rem","color:var(--cream)",
     "box-shadow:0 4px 16px rgba(0,0,0,0.4)",
     "animation:slide-down 200ms ease",
   ].join(";");
@@ -982,35 +1411,66 @@ function _handleGameOver(data) {
   if (banner) {
     banner.className = `result-banner ${deal ? "deal" : "walk"}`;
     banner.classList.remove("hidden");
-
-    const title = banner.querySelector(".result-title");
-    if (title) title.textContent = deal ? "Deal Closed" : "Walked Away";
-
-    const amountEl = banner.querySelector(".result-amount");
-    if (amountEl) amountEl.textContent = amount != null ? formatCurrency(amount, "USD") : "—";
-
+    const title   = banner.querySelector(".result-title");
+    const amountEl= banner.querySelector(".result-amount");
     const scoreEl = banner.querySelector(".result-score");
-    if (scoreEl) scoreEl.textContent = `Score: ${score.toFixed(2)}`;
+    if (title)   title.textContent   = deal ? "Deal Closed" : "Walked Away";
+    if (amountEl) amountEl.textContent = amount != null ? formatCurrency(amount, "USD") : "—";
+    if (scoreEl)  scoreEl.textContent  = `Score: ${score.toFixed(2)}`;
   }
 
   if (character) character.setState(deal ? "pleased" : "shocked");
   setTimeout(loadLeaderboard, 1200);
-
-  if (APP_DEBUG) console.log("[app] game over", { deal, amount, score });
 }
 
-// ── Scenario Dossier Cards ────────────────────────────────────
+// ── Act Pills — item 26 ────────────────────────────────────────
+function _updateActPills(act) {
+  const labels = {
+    1: "I · Price", 2: "II · Terms", 3: "III · Coalition",
+  };
+  [1, 2, 3].forEach(n => {
+    const pill = document.getElementById(`act-pill-${n}`);
+    if (!pill) return;
+    pill.classList.remove("active", "completed", "locked");
+
+    if (n < act) {
+      pill.classList.add("completed");
+      pill.textContent = `✓ ${labels[n]}`;
+      pill.style.cursor = "pointer";
+      pill.onclick = () => _showActTranscript(n);
+    } else if (n === act) {
+      pill.classList.add("active");
+      pill.textContent = labels[n];
+      pill.style.cursor = "default";
+      pill.onclick = null;
+    } else {
+      pill.classList.add("locked");
+      pill.textContent = labels[n];
+      pill.style.cursor = "not-allowed";
+      pill.setAttribute("data-lock-msg", `Complete Act ${['I','II'][n-2]} first`);
+      pill.onclick = null;
+    }
+  });
+}
+
+function _showActTranscript(act) {
+  const msgs = gameState.actTranscripts[act] || [];
+  if (!msgs.length) return;
+  _showToast(`Act ${['I','II','III'][act-1]} — ${msgs.length} messages (read-only view)`);
+}
+
+// ── Scenario + Persona render ──────────────────────────────────
 function _renderScenarioDossiers(scenarios) {
   const grid = document.getElementById("scenario-dossier-grid");
   if (!grid) return;
   grid.innerHTML = "";
 
   const defaults = [
-    { id: "saas_enterprise",        title: "Enterprise SaaS",       description: "500-seat analytics platform",     zopa_lower: 125000,  zopa_upper: 165000,  difficulty: 2 },
-    { id: "consulting_retainer",    title: "Consulting Retainer",   description: "Monthly strategy retainer",       zopa_lower: 25000,   zopa_upper: 40000,   difficulty: 1 },
-    { id: "hiring_package",         title: "Senior Eng. Offer",     description: "Total comp negotiation",          zopa_lower: 195000,  zopa_upper: 230000,  difficulty: 2 },
-    { id: "vendor_hardware",        title: "Hardware Contract",     description: "200-unit bulk purchase",          zopa_lower: 1750000, zopa_upper: 2200000, difficulty: 3 },
-    { id: "acquisition_term_sheet", title: "Startup Acquisition",   description: "Acqui-hire term sheet",           zopa_lower: 10500000,zopa_upper:16000000, difficulty: 3 },
+    { id: "saas_enterprise",        title: "Enterprise SaaS",       description: "500-seat analytics platform",   zopa_lower: 125000,   zopa_upper: 165000,   difficulty: 2 },
+    { id: "consulting_retainer",    title: "Consulting Retainer",   description: "Monthly strategy retainer",     zopa_lower: 25000,    zopa_upper: 40000,    difficulty: 1 },
+    { id: "hiring_package",         title: "Senior Eng. Offer",     description: "Total comp negotiation",        zopa_lower: 195000,   zopa_upper: 230000,   difficulty: 2 },
+    { id: "vendor_hardware",        title: "Hardware Contract",     description: "200-unit bulk purchase",        zopa_lower: 1750000,  zopa_upper: 2200000,  difficulty: 3 },
+    { id: "acquisition_term_sheet", title: "Startup Acquisition",   description: "Acqui-hire term sheet",         zopa_lower: 10500000, zopa_upper: 16000000, difficulty: 3 },
   ];
 
   const list = (scenarios && scenarios.length) ? scenarios : defaults;
@@ -1021,8 +1481,7 @@ function _renderScenarioDossiers(scenarios) {
     const card = document.createElement("div");
     card.className = "scenario-dossier";
     card.dataset.scenarioId = s.id || s.scenario_id;
-    card.setAttribute("role", "radio");
-    card.setAttribute("tabindex", "0");
+    card.setAttribute("role", "radio"); card.setAttribute("tabindex", "0");
 
     const caseEl = document.createElement("div");
     caseEl.className = "dossier-case";
@@ -1054,8 +1513,9 @@ function _renderScenarioDossiers(scenarios) {
     card.addEventListener("click", () => {
       grid.querySelectorAll(".scenario-dossier").forEach(c => c.classList.remove("selected"));
       card.classList.add("selected");
+      gameState.scenarioData = s;
     });
-    card.addEventListener("keydown", (e) => {
+    card.addEventListener("keydown", e => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); card.click(); }
     });
 
@@ -1063,37 +1523,32 @@ function _renderScenarioDossiers(scenarios) {
   });
 }
 
-// ── Persona Cards ──────────────────────────────────────────────
 function _renderPersonaCards(personas) {
   const grid = document.getElementById("persona-cards-grid");
   if (!grid) return;
   grid.innerHTML = "";
 
   const defaults = [
-    { id: "shark",    name: "The Shark",    symbol: "◈", aggression: 0.88, patience: 0.18, bluff_rate: 0.72 },
-    { id: "diplomat", name: "The Diplomat", symbol: "◎", aggression: 0.20, patience: 0.85, bluff_rate: 0.15 },
-    { id: "analyst",  name: "The Analyst",  symbol: "◻", aggression: 0.35, patience: 0.90, bluff_rate: 0.10 },
-    { id: "wildcard", name: "The Wildcard", symbol: "◇", aggression: 0.60, patience: 0.25, bluff_rate: 0.65 },
-    { id: "veteran",  name: "The Veteran",  symbol: "◆", aggression: 0.50, patience: 0.95, bluff_rate: 0.45 },
+    { id: "shark",    name: "The Shark",    symbol: "◈", aggression: 0.88, patience: 0.18 },
+    { id: "diplomat", name: "The Diplomat", symbol: "◎", aggression: 0.20, patience: 0.85 },
+    { id: "analyst",  name: "The Analyst",  symbol: "◻", aggression: 0.35, patience: 0.90 },
+    { id: "wildcard", name: "The Wildcard", symbol: "◇", aggression: 0.60, patience: 0.25 },
+    { id: "veteran",  name: "The Veteran",  symbol: "◆", aggression: 0.50, patience: 0.95 },
   ];
 
   const list = (personas && personas.length) ? personas : defaults;
 
   list.forEach((p) => {
-    const pid = p.id || p.persona_id;
-
+    const pid  = p.id || p.persona_id;
     const card = document.createElement("div");
     card.className = "persona-card-option";
     card.dataset.persona = pid;
-    card.setAttribute("role", "radio");
-    card.setAttribute("tabindex", "0");
+    card.setAttribute("role", "radio"); card.setAttribute("tabindex", "0");
 
-    // Mini Three.js preview canvas
     const canvasWrap = document.createElement("div");
     canvasWrap.className = "persona-card-canvas-wrap";
     const previewCanvas = document.createElement("canvas");
-    previewCanvas.width  = 280;
-    previewCanvas.height = 200;
+    previewCanvas.width = 280; previewCanvas.height = 200;
     canvasWrap.appendChild(previewCanvas);
     card.appendChild(canvasWrap);
 
@@ -1107,46 +1562,35 @@ function _renderPersonaCards(personas) {
     symEl.textContent = p.symbol || "◈";
     card.appendChild(symEl);
 
-    // Trait bars
     const traits = document.createElement("div");
     traits.className = "persona-trait-bars";
     [
       { label: "AGG", val: p.aggression ?? 0.5 },
       { label: "PAT", val: p.patience   ?? 0.5 },
     ].forEach(({ label, val }) => {
-      const row = document.createElement("div");
-      row.className = "persona-trait-row";
-      const lbl = document.createElement("div");
-      lbl.className = "persona-trait-label";
-      lbl.textContent = label;
-      const bar = document.createElement("div");
-      bar.className = "persona-trait-bar";
-      const fill = document.createElement("div");
-      fill.className = "persona-trait-fill";
+      const row   = document.createElement("div"); row.className = "persona-trait-row";
+      const lbl   = document.createElement("div"); lbl.className = "persona-trait-label"; lbl.textContent = label;
+      const bar   = document.createElement("div"); bar.className = "persona-trait-bar";
+      const fill  = document.createElement("div"); fill.className = "persona-trait-fill";
       fill.style.width = `${Math.round(val * 100)}%`;
-      bar.appendChild(fill);
-      row.appendChild(lbl);
-      row.appendChild(bar);
+      bar.appendChild(fill); row.appendChild(lbl); row.appendChild(bar);
       traits.appendChild(row);
     });
     card.appendChild(traits);
 
-    // Click selection
     card.addEventListener("click", () => {
       grid.querySelectorAll(".persona-card-option").forEach(c => c.classList.remove("selected"));
       card.classList.add("selected");
     });
-    card.addEventListener("keydown", (e) => {
+    card.addEventListener("keydown", e => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); card.click(); }
     });
 
     grid.appendChild(card);
 
-    // Spin up a PersonaPreviewCharacter after DOM insert
     requestAnimationFrame(() => {
       if (typeof PersonaPreviewCharacter !== "undefined") {
-        const prev = new PersonaPreviewCharacter(previewCanvas, pid);
-        _previewChars[pid] = prev;
+        _previewChars[pid] = new PersonaPreviewCharacter(previewCanvas, pid);
       }
     });
   });
@@ -1162,7 +1606,6 @@ function _initCharacter(persona) {
   if (typeof NegotiatorCharacter === "undefined") return;
   if (character) character.destroy();
   character = new NegotiatorCharacter("character-canvas", persona || "shark");
-  if (APP_DEBUG) console.log("[app] character created for persona:", persona);
 }
 
 // ── Sparkline init ────────────────────────────────────────────
@@ -1171,8 +1614,8 @@ function _initSparkline(observation) {
   const lo   = observation.player_batna   ?? observation.your_batna   ?? observation.zopa_lower  ?? 0;
   const hi   = observation.opponent_batna ?? observation.opp_batna    ?? observation.zopa_upper  ?? 0;
   const nash = observation.nash_point     ?? ((lo + hi) / 2);
-  charts.initOfferSparkline && charts.initOfferSparkline("offer-sparkline", lo, hi, nash);
-  charts.initBeliefChart    && charts.initBeliefChart("belief-chart");
+  charts.initOfferSparkline?.("offer-sparkline", lo, hi, nash);
+  charts.initBeliefChart?.("belief-chart");
 }
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -1180,8 +1623,7 @@ function formatCurrency(amount, currency) {
   if (amount == null || isNaN(amount)) return "—";
   try {
     return new Intl.NumberFormat("en-US", {
-      style: "currency", currency: currency || "USD",
-      maximumFractionDigits: 0,
+      style: "currency", currency: currency || "USD", maximumFractionDigits: 0,
     }).format(amount);
   } catch {
     return `$${Number(amount).toLocaleString()}`;
@@ -1191,50 +1633,41 @@ function formatCurrency(amount, currency) {
 function setLoading(isLoading) {
   const overlay = document.getElementById("loading-overlay");
   if (overlay) overlay.classList.toggle("hidden", !isLoading);
-  ["btn-submit", "btn-accept", "btn-walk"].forEach(id => {
+  ["btn-submit", "chip-accept", "chip-walk", "chip-offer"].forEach(id => {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = isLoading;
   });
 }
 
 function _setInputsDisabled(disabled) {
-  ["offer-input", "move-select", "btn-submit", "btn-accept", "btn-walk"].forEach(id => {
+  ["offer-input", "btn-submit", "chip-accept", "chip-walk", "chip-offer"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = disabled;
   });
 }
 
-function _updateActPills(act) {
-  [1, 2, 3].forEach(n => {
-    const pill = document.getElementById(`act-pill-${n}`);
-    if (!pill) return;
-    pill.classList.remove("active", "completed");
-    if (n < act)        pill.classList.add("completed");
-    else if (n === act) pill.classList.add("active");
-  });
-}
-
-function _moveSummary(move, offer) {
-  switch (move) {
-    case "anchor":    return `Anchoring at ${formatCurrency(offer, "USD")}.`;
-    case "counter":   return `Counter offer: ${formatCurrency(offer, "USD")}.`;
-    case "concede":   return `Concession: ${formatCurrency(offer, "USD")}.`;
-    case "package":   return `Package deal: ${formatCurrency(offer, "USD")}.`;
-    case "accept":    return "Accepting the deal.";
-    case "walk_away": return "Walking away from the table.";
-    default:          return offer != null ? formatCurrency(offer, "USD") : move;
-  }
-}
-
 function _personaLabel(persona) {
-  const labels = {
-    shark:    "The Shark",
-    diplomat: "The Diplomat",
-    analyst:  "The Analyst",
-    wildcard: "The Wildcard",
-    veteran:  "The Veteran",
-  };
+  const labels = { shark: "The Shark", diplomat: "The Diplomat",
+                   analyst: "The Analyst", wildcard: "The Wildcard", veteran: "The Veteran" };
   return labels[persona] || persona;
+}
+
+function _personaSymbol(persona) {
+  const syms = { shark: "◈", diplomat: "◎", analyst: "◻", wildcard: "◇", veteran: "◆" };
+  return syms[persona] || "◈";
+}
+
+function _personaColor(persona) {
+  const cols = { shark: "var(--scarlet-light)", diplomat: "var(--emerald)",
+                 analyst: "var(--parlay-blue)", wildcard: "var(--gold)", veteran: "var(--parlay-purple)" };
+  return cols[persona] || "var(--gold)";
+}
+
+function _personaTag(persona) {
+  const tags = { shark: "Aggressive · Low A", diplomat: "Cooperative · High A",
+                 analyst: "Analytical · Data-driven", wildcard: "Unpredictable · High Variance",
+                 veteran: "Experienced · Patient" };
+  return tags[persona] || "Negotiator";
 }
 
 function _showError(msg) {

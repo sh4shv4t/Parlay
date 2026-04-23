@@ -21,10 +21,9 @@ from agent.runner import run_episode
 
 logger = logging.getLogger(__name__)
 
-TOP_PLAYER_THRESHOLD = float(os.getenv("TOP_PLAYER_THRESHOLD", "0.60"))
+TOP_PLAYER_THRESHOLD = float(os.getenv("TOP_PLAYER_THRESHOLD", "0.30"))
 
 DIVERSITY_CONFIG = {
-    "min_per_combination": 20,   # at least 20 episodes per (persona, scenario) pair
     "noise_injection_rate": 0.3, # 30% inject random early moves
     "drift_force_rate": 0.4,     # 40% force drift events
     "act3_rate": 0.25,           # 25% target Act 3 scenarios
@@ -89,15 +88,22 @@ async def generate_dataset(
             logger.warning(f"Episode failed (persona={persona.value}, scenario={scenario_id}): {exc}")
             return None
 
+    # Calculate how many episodes per (persona × scenario) pair so the
+    # diversity pass never exceeds 80% of the requested budget.
+    n_combinations = len(list(PersonaType)) * len(SCENARIOS)
+    diversity_budget = int(n_episodes * 0.8)
+    min_per_combination = max(1, diversity_budget // n_combinations)
+
     logger.info(
         f"Generating {n_episodes} episodes "
-        f"(min {DIVERSITY_CONFIG['min_per_combination']} per combination)"
+        f"(~{min_per_combination} per combination, {n_combinations} combos, "
+        f"80% diversity budget = {diversity_budget})"
     )
 
     # Pass 1: ensure minimum coverage per (persona × scenario)
     for persona in PersonaType:
         for scenario in SCENARIOS:
-            for i in range(DIVERSITY_CONFIG["min_per_combination"]):
+            for i in range(min_per_combination):
                 inject_noise = random.random() < DIVERSITY_CONFIG["noise_injection_rate"]
                 force_drift  = random.random() < DIVERSITY_CONFIG["drift_force_rate"]
                 record = await _run_one(persona, scenario.id, inject_noise, force_drift, seed)

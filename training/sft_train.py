@@ -7,7 +7,7 @@ Usage:
         --data data/episodes.jsonl \
         --model Qwen/Qwen2.5-7B-Instruct \
         --output models/parlay-sft \
-        --threshold 0.60
+        --threshold 0.30
 """
 import argparse
 import json
@@ -17,11 +17,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-TOP_PLAYER_THRESHOLD = float(os.getenv("TOP_PLAYER_THRESHOLD", "0.60"))
+TOP_PLAYER_THRESHOLD = float(os.getenv("TOP_PLAYER_THRESHOLD", "0.30"))
 BASE_MODEL = os.getenv("BASE_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 
 
-def load_sft_dataset(jsonl_path: Path, threshold: float = 0.60):
+def load_sft_dataset(jsonl_path: Path, threshold: float = 0.30):
     """
     Load episodes above efficiency threshold and format for SFT.
 
@@ -87,7 +87,7 @@ def train_sft(
     data_path: Path,
     model_id: str,
     output_dir: Path,
-    threshold: float = 0.60,
+    threshold: float = 0.30,
 ) -> Path:
     """
     Run SFT fine-tuning.
@@ -112,10 +112,15 @@ def train_sft(
         raise ImportError("Install: pip install trl peft") from exc
 
     dataset = load_sft_dataset(data_path, threshold)
+    if len(dataset) == 0 and threshold > 0.0:
+        logger.warning(
+            f"No episodes above threshold {threshold}. Lowering to 0.0 (all train rows)."
+        )
+        dataset = load_sft_dataset(data_path, 0.0)
     if len(dataset) == 0:
-        raise ValueError(
-            f"No training examples above threshold={threshold}. "
-            "Lower the threshold or generate more data."
+        raise RuntimeError(
+            "SFT dataset is empty. "
+            "Run generate_data.py first with --episodes >= 200"
         )
 
     lora_config = LoraConfig(

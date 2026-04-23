@@ -37,7 +37,7 @@ train-data:
 	venv-train\Scripts\python -m training.generate_data --episodes 2000 --output data/episodes.jsonl
 
 train-sft:
-	venv-train\Scripts\python -m training.sft_train --model Qwen/Qwen2.5-7B-Instruct --data data/episodes.jsonl --output models/parlay-sft --threshold 0.60
+	venv-train\Scripts\python -m training.sft_train --model Qwen/Qwen2.5-7B-Instruct --data data/episodes.jsonl --output models/parlay-sft --threshold 0.30
 
 train-grpo:
 	venv-train\Scripts\python -m training.grpo_train --model models/parlay-sft --data data/episodes.jsonl --output models/parlay-grpo --steps 500

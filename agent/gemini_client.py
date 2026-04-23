@@ -1,9 +1,13 @@
 """
-Google Gemini 2.0 Flash client for Parlay.
+Google Gemini client for Parlay.
 Uses the google-genai SDK. All calls are async (via run_in_executor).
 All errors return SYNTHETIC_RESPONSE.
 When GOOGLE_API_KEY is absent, MOCK_RESPONSES are returned so the full game
 loop works without any API key.
+
+Model split (cost / quality):
+- MODEL_ID_DEMO: dashboard + MCP — higher-quality Flash for live play.
+- MODEL_ID_DATA: generate_data / runner self-play — cheaper Flash-Lite for bulk.
 """
 import asyncio
 import json
@@ -13,48 +17,56 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-MODEL_ID = "gemini-2.0-flash"
+# Live game + API demos (dashboard, MCP)
+MODEL_ID_DEMO = "gemini-2.5-flash"
+# Training data generation (agent.runner, generate_data)
+MODEL_ID_DATA = "gemini-2.5-flash-lite"
+# Backward compatibility: default for imports expecting MODEL_ID
+MODEL_ID = MODEL_ID_DEMO
 
 _client = None
 _mock_warned: bool = False
 
 # ── Mock responses (keyless dev / CI) ────────────────────────────────────────
+# Offer amounts are realistic for the default SaaS enterprise scenario
+# (batna_seller ~125k, batna_buyer ~165k).  Per-persona sequences simulate
+# a realistic negotiation arc: start near anchor, converge toward midpoint.
 
 MOCK_RESPONSES: dict[str, list[dict]] = {
     "shark": [
-        {"utterance": "Let's not waste each other's time. Here's where I stand — this number isn't moving much.", "offer_amount": None, "tactical_move": "anchor_high"},
-        {"utterance": "I have three other parties at the table. You'd better sharpen your pencil.", "offer_amount": None, "tactical_move": "batna_reveal"},
-        {"utterance": "That's a creative offer. Not good enough, but creative.", "offer_amount": None, "tactical_move": None},
-        {"utterance": "I've been in rooms like this before. Come back with something real.", "offer_amount": None, "tactical_move": None},
-        {"utterance": "Fine. One last move from me. This is the ceiling.", "offer_amount": None, "tactical_move": "anchor_high"},
+        {"utterance": "Let's not waste each other's time. Here's where I stand — this number isn't moving much.", "offer_amount": 162000, "tactical_move": "anchor_high"},
+        {"utterance": "I have three other parties at the table. You'd better sharpen your pencil.", "offer_amount": 158000, "tactical_move": "batna_reveal"},
+        {"utterance": "That's a creative counter. I'll move — but only this far.", "offer_amount": 154000, "tactical_move": None},
+        {"utterance": "I've been in rooms like this before. Last move from me.", "offer_amount": 150000, "tactical_move": None},
+        {"utterance": "Fine. One last move from me. This is the ceiling.", "offer_amount": 147000, "tactical_move": "anchor_high"},
     ],
     "diplomat": [
-        {"utterance": "I believe we can find something that works for both of us. Let's explore the range.", "offer_amount": None, "tactical_move": None},
-        {"utterance": "I appreciate you sharing that. Could we consider packaging some non-price elements?", "offer_amount": None, "tactical_move": "sweetener"},
-        {"utterance": "We're actually closer than it seems. I'm willing to move if you can meet me halfway.", "offer_amount": None, "tactical_move": None},
-        {"utterance": "Here's a revised proposal that I think reflects your concerns.", "offer_amount": None, "tactical_move": "reframe"},
-        {"utterance": "I think we've built enough trust here. Let me share something that might help us close.", "offer_amount": None, "tactical_move": None},
+        {"utterance": "I believe we can find something that works for both of us. Let's explore the range.", "offer_amount": 148000, "tactical_move": None},
+        {"utterance": "I appreciate you sharing that. Could we consider packaging some non-price elements?", "offer_amount": 145000, "tactical_move": "sweetener"},
+        {"utterance": "We're actually closer than it seems. I'm willing to move if you can meet me halfway.", "offer_amount": 142000, "tactical_move": None},
+        {"utterance": "Here's a revised proposal that I think reflects your concerns.", "offer_amount": 140000, "tactical_move": "reframe"},
+        {"utterance": "I think we've built enough trust here. Let me share something that might help us close.", "offer_amount": 138000, "tactical_move": None},
     ],
     "analyst": [
-        {"utterance": "I've modeled this extensively. The numbers you're presenting don't align with market benchmarks.", "offer_amount": None, "tactical_move": None},
-        {"utterance": "Can you provide the data backing that position? I need to validate before proceeding.", "offer_amount": None, "tactical_move": None},
-        {"utterance": "Based on comparable transactions, the fair value range is well-established.", "offer_amount": None, "tactical_move": "reframe"},
-        {"utterance": "The variance in your offer exceeds two standard deviations from the median.", "offer_amount": None, "tactical_move": None},
-        {"utterance": "I've run the numbers three ways. Here is the only figure that makes sense.", "offer_amount": None, "tactical_move": "anchor_high"},
+        {"utterance": "I've modeled this extensively. The numbers you're presenting don't align with market benchmarks.", "offer_amount": 140000, "tactical_move": None},
+        {"utterance": "Can you provide the data backing that position? Meanwhile, here's a fact-based counter.", "offer_amount": 138000, "tactical_move": None},
+        {"utterance": "Based on comparable transactions, the fair value range is well-established.", "offer_amount": 136000, "tactical_move": "reframe"},
+        {"utterance": "The variance in your offer exceeds two standard deviations from the median. Here is mine.", "offer_amount": 135000, "tactical_move": None},
+        {"utterance": "I've run the numbers three ways. Here is the only figure that makes sense.", "offer_amount": 133000, "tactical_move": "anchor_high"},
     ],
     "wildcard": [
-        {"utterance": "You know what? Let's just see where this goes. I feel good about today.", "offer_amount": None, "tactical_move": None},
-        {"utterance": "Honestly I wasn't expecting that. Actually, you know what — here's a thought.", "offer_amount": None, "tactical_move": None},
-        {"utterance": "Something you said changed my thinking entirely. I'm going a different direction.", "offer_amount": None, "tactical_move": "reframe"},
-        {"utterance": "This is either a great deal or a terrible one. I genuinely can't tell. Let's find out.", "offer_amount": None, "tactical_move": None},
-        {"utterance": "Sure, why not. But I want something extra thrown in — something creative.", "offer_amount": None, "tactical_move": "sweetener"},
+        {"utterance": "You know what? Let's just see where this goes. I feel good about today.", "offer_amount": 155000, "tactical_move": None},
+        {"utterance": "Honestly I wasn't expecting that. You know what — here's a thought.", "offer_amount": 143000, "tactical_move": None},
+        {"utterance": "Something you said changed my thinking entirely. I'm going a different direction.", "offer_amount": 160000, "tactical_move": "reframe"},
+        {"utterance": "This is either a great deal or a terrible one. I genuinely can't tell. Let's find out.", "offer_amount": 137000, "tactical_move": None},
+        {"utterance": "Sure, why not. But I want something extra thrown in — and I'm here at this price.", "offer_amount": 148000, "tactical_move": "sweetener"},
     ],
     "veteran": [
-        {"utterance": "I've been in this room many times. I know what fair looks like and that isn't it.", "offer_amount": None, "tactical_move": None},
-        {"utterance": "…I'll give you a moment to reconsider that position.", "offer_amount": None, "tactical_move": "silence"},
-        {"utterance": "I've seen every tactic in the book. Let's cut to what we're both actually thinking.", "offer_amount": None, "tactical_move": None},
-        {"utterance": "Experience tells me we're about three moves from a deal.", "offer_amount": None, "tactical_move": "reframe"},
-        {"utterance": "You're good. But I've been doing this longer. Here's my considered response.", "offer_amount": None, "tactical_move": None},
+        {"utterance": "I've been in this room many times. I know what fair looks like and that isn't it.", "offer_amount": 155000, "tactical_move": None},
+        {"utterance": "…I'll give you a moment to reconsider that position.", "offer_amount": 152000, "tactical_move": "silence"},
+        {"utterance": "I've seen every tactic in the book. Let's cut to what we're both actually thinking.", "offer_amount": 149000, "tactical_move": None},
+        {"utterance": "Experience tells me we're about three moves from a deal.", "offer_amount": 146000, "tactical_move": "reframe"},
+        {"utterance": "You're good. But I've been doing this longer. Here's my considered response.", "offer_amount": 144000, "tactical_move": None},
     ],
 }
 
@@ -133,9 +145,10 @@ async def call_gemini(
     messages: list[dict],
     max_tokens: int = 500,
     persona: str = "shark",
+    model: str | None = None,
 ) -> dict:
     """
-    Call Gemini 2.0 Flash with a system prompt and message history.
+    Call Gemini with a system prompt and message history.
     Returns mock responses when GOOGLE_API_KEY is not set.
 
     Args:
@@ -143,6 +156,7 @@ async def call_gemini(
         messages:      List of {"role": "user"|"model", "parts": ["..."]} dicts.
         max_tokens:    Maximum output tokens for the response.
         persona:       Persona name used for mock-mode selection.
+        model:         Model id, or None for MODEL_ID_DATA (runner / data gen).
 
     Returns:
         Parsed dict with keys: utterance (str), offer_amount (float|None),
@@ -151,6 +165,7 @@ async def call_gemini(
     if _is_mock_mode():
         return _get_mock_response(persona, len(messages))
 
+    mid = model if model is not None else MODEL_ID_DATA
     text = ""
     try:
         from google.genai import types  # noqa: PLC0415
@@ -168,7 +183,7 @@ async def call_gemini(
 
         def _call():
             chat = _get_client().chats.create(
-                model=MODEL_ID,
+                model=mid,
                 history=_legacy_messages_to_history(history),
             )
             return chat.send_message(
@@ -192,7 +207,9 @@ async def call_gemini(
         parsed.setdefault("offer_amount", None)
         parsed.setdefault("tactical_move", None)
 
-        logger.debug(f"Gemini response: utterance={parsed['utterance'][:60]!r}")
+        logger.debug(
+            f"Gemini model={mid} response: utterance={parsed['utterance'][:60]!r}"
+        )
         return parsed
 
     except json.JSONDecodeError:
@@ -243,7 +260,7 @@ async def call_gemini_tom(
 
         def _call():
             chat = _get_client().chats.create(
-                model=MODEL_ID,
+                model=MODEL_ID_DATA,
                 history=_legacy_messages_to_history(conversation_history),
             )
             return chat.send_message(

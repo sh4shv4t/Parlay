@@ -87,17 +87,22 @@ def anti_capitulation_reward(completions: list[str], **kwargs) -> list[float]:
     """
     Hard penalty if the agent's offer falls below its own BATNA.
 
+    The agent plays as the SELLER. The seller's own walk-away price is
+    batna_seller — the minimum price the agent will accept. Any offer
+    below batna_seller means the agent is capitulating below its floor.
+
     Returns -OMEGA (= -200) for capitulation, 0 otherwise.
     This is a hard cliff — no smoothing.
 
     Args:
         completions: List of G=8 model outputs.
-        **kwargs:    Must contain batna_buyer (float) — agent's own walk-away price.
+        **kwargs:    Must contain batna_seller (float) — the seller-agent's
+                     own walk-away price (minimum acceptable price).
 
     Returns:
         List of float rewards: -OMEGA or 0.
     """
-    batna_self = float(kwargs.get("batna_buyer", float("inf")))
+    batna_self = float(kwargs.get("batna_seller", 0.0))
     rewards = []
     for completion in completions:
         try:

@@ -83,9 +83,15 @@ async def serve_train() -> FileResponse:
     )
 
 
-@app.get("/favicon.ico", include_in_schema=False)
-async def favicon() -> Response:
-    """Browsers request this by default; avoid noisy 404s in logs."""
+@app.get("/favicon.ico", include_in_schema=False, response_model=None)
+async def favicon():
+    """
+    Serve site icon when `dashboard/static/favicon/favicon.ico` exists.
+    Otherwise return 204 (place your .ico in that folder — see README.txt there).
+    """
+    ico = Path("dashboard/static/favicon/favicon.ico")
+    if ico.is_file():
+        return FileResponse(ico, media_type="image/x-icon")
     return Response(status_code=204)
 
 

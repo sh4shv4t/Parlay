@@ -11,7 +11,7 @@ from typing import Optional
 
 import numpy as np
 
-from parlay_env.grader import EpisodeGrade, grade_episode
+from parlay_env.grader import EpisodeGrade, compute_step_reward, grade_episode
 from parlay_env.models import (
     BeliefState,
     HiddenState,
@@ -50,6 +50,10 @@ async def run_episode(
 ) -> EpisodeResult:
     """
     Run a single self-play negotiation episode.
+
+    Per-turn step rewards are computed via compute_step_reward() and
+    accumulated into state.cumulative_reward each turn so the terminal
+    grader sees the full dense-reward signal.
 
     Args:
         persona:      Opponent persona.
@@ -114,6 +118,7 @@ async def run_episode(
     drift_adapted = False
     drift_turn: Optional[int] = None
     final_price: Optional[float] = None
+    cumulative_reward: float = 0.0
 
     opening = persona_cfg.opening_line
     conversation.append({"role": "model", "content": opening, "turn": 0})
@@ -148,7 +153,10 @@ async def run_episode(
             ],
         })
 
-        agent_response = await call_gemini(system_prompt, agent_messages)
+        # Always pass persona explicitly so mock mode uses the right responses
+        agent_response = await call_gemini(
+            system_prompt, agent_messages, persona=persona.value
+        )
         action = ParlayAction(
             utterance=agent_response.get("utterance", "..."),
             offer_amount=agent_response.get("offer_amount"),
@@ -176,6 +184,7 @@ async def run_episode(
                 f"Your budget ceiling: {hidden.budget_ceiling:,.0f}"
             ),
             opponent_messages,
+            persona=persona.value,
         )
 
         conversation.append({
@@ -201,6 +210,34 @@ async def run_episode(
         if action.offer_amount:
             new_offers.append(action.offer_amount)
 
+        cp_delta = _get_cp_cost(action.tactical_move) if action.tactical_move else 0
+
+        # Build next state (without cumulative_reward — computed below)
+        next_state_fields = {
+            **state.model_dump(),
+            "step_count": turn + 1,
+            "offer_history": new_offers,
+            "belief_history": tom.history,
+            "episode_done": turn + 1 >= max_turns,
+            "termination_reason": "max_turns" if turn + 1 >= max_turns else None,
+            "credibility_points": max(0, state.credibility_points + 5 - cp_delta),
+        }
+        next_state_tmp = ParlayState(**next_state_fields)
+
+        # Compute per-step dense reward and accumulate
+        step_reward = compute_step_reward(state, action, next_state_tmp)
+        cumulative_reward += step_reward
+        logger.debug(
+            f"Turn {turn + 1}: step_reward={step_reward:.3f}, "
+            f"cumulative={cumulative_reward:.3f}"
+        )
+
+        # Update state carrying forward the accumulated reward
+        state = ParlayState(
+            **{**next_state_fields, "cumulative_reward": cumulative_reward}
+        )
+
+        # Check for deal close (within 3% of each other)
         if action.offer_amount and opponent_response.get("offer_amount"):
             agent_offer = action.offer_amount
             opp_offer = float(opponent_response["offer_amount"])
@@ -208,19 +245,6 @@ async def run_episode(
                 final_price = (agent_offer + opp_offer) / 2
                 logger.info(f"Deal reached at {final_price:,.0f} on turn {turn + 1}")
                 break
-
-        cp_delta = _get_cp_cost(action.tactical_move) if action.tactical_move else 0
-        state = ParlayState(
-            **{
-                **state.model_dump(),
-                "step_count": turn + 1,
-                "offer_history": new_offers,
-                "belief_history": tom.history,
-                "episode_done": turn + 1 >= max_turns,
-                "termination_reason": "max_turns" if turn + 1 >= max_turns else None,
-                "credibility_points": max(0, state.credibility_points + 5 - cp_delta),
-            }
-        )
 
     grade = grade_episode(
         state,
@@ -233,7 +257,8 @@ async def run_episode(
 
     logger.info(
         f"Episode done: scenario={scenario_id}, persona={persona.value}, "
-        f"reward={grade.total_reward:.2f}, efficiency={grade.deal_efficiency:.3f}"
+        f"reward={grade.total_reward:.2f}, efficiency={grade.deal_efficiency:.3f}, "
+        f"cumulative_step_reward={cumulative_reward:.3f}"
     )
 
     return EpisodeResult(
