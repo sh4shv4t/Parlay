@@ -1,6 +1,12 @@
 """
 Parlay OpenEnv WebSocket server.
 Implements the standard reset/step/state protocol.
+
+OpenEnv WebSocket URL (this module only; default port from ENV_PORT or --port, default 8001):
+  ws://localhost:8001/env/ws
+  (path is /env/ws because the router uses prefix="/env" and defines @router.websocket("/ws").)
+When the same router is mounted on main:app (uvicorn main:app --port 8000):
+  ws://localhost:8000/env/ws
 """
 import json
 import logging

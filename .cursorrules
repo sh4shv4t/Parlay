@@ -161,6 +161,14 @@ A feature is done when:
 6. `docker compose up --build` passes without errors
 7. For training code: produces a visible upward reward curve in evaluate.py output
 
+## WebSocket Server
+- The OpenEnv WebSocket endpoint is at: `ws://localhost:8001/env/ws` (confirmed working — see `smoke_test.py` and `python scripts/ws_path.py`)
+- When the env router is included in `main:app` (e.g. `uvicorn main:app --port 8000`), use: `ws://localhost:8000/env/ws`
+- No authentication is required for local connections; the `env_websocket` handler only calls `await websocket.accept()`.
+- The combined FastAPI app in `main.py` uses CORS: `allow_origins=["*"]` (the standalone `parlay_env.server` `_env_app` does not add `CORSMiddleware`, which is normal for a minimal env process).
+- The OpenEnv process listens on port **8001** by default (`ENV_PORT` or `python -m parlay_env.server --port`); the dashboard app is typically **8000** — do not conflate the two.
+- Do NOT add Origin or auth checks to the WebSocket handler without also updating `smoke_test.py` and the Colab notebook (Cell 4) that probes the WebSocket.
+
 ## Windows Development Rules
 
 - Venv paths use Windows convention: venv\Scripts\ not venv/bin/
