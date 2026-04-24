@@ -42,7 +42,7 @@ SCENARIO_ROLE_CONTEXT: dict[str, dict[str, str]] = {
     },
 }
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
 # Aliases for imports (dashboard, MCP, training all use flash-lite)
 MODEL_ID_DEMO = GEMINI_MODEL
 MODEL_ID_DATA = GEMINI_MODEL

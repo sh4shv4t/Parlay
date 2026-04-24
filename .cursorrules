@@ -11,9 +11,9 @@ NO Anthropic API anywhere. NO npm. NO build step.
 
 ## LLM Client Rules (Gemini)
 
-- Model: `gemini-2.5-flash` everywhere. Never use other model names in game/agent code.
+- Model: `gemini-2.5-flash-lite` everywhere. Never use other model names in game/agent code.
 - Import: `from google import genai` and `from google.genai import types` — never `anthropic` or legacy `google.generativeai`.
-- Client: `genai.Client(api_key=os.environ.get("GOOGLE_API_KEY", ""))`; chats via `client.chats.create(model="gemini-2.5-flash", ...)`.
+- Client: `genai.Client(api_key=os.environ.get("GOOGLE_API_KEY", ""))`; chats via `client.chats.create(model="gemini-2.5-flash-lite", ...)`.
 - ALL Gemini calls wrapped in try/except returning `SYNTHETIC_RESPONSE` on failure.
 - JSON extraction: always strip markdown fences before `json.loads()`.
 - Async Gemini calls: use `asyncio.get_event_loop().run_in_executor(None, lambda: ...)`.
