@@ -5,12 +5,13 @@ import json
 import logging
 import os
 import random
+import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-from agent.runner import run_episode
+from agent.runner import EpisodeResult, run_episode
 from game.scenarios import SCENARIOS
 from parlay_env.models import PersonaType
 
@@ -45,20 +46,21 @@ def is_quality_episode(grade, args) -> tuple[bool, str]:
     return False, f"low_quality (eff={grade.deal_efficiency:.2f}, tom={grade.tom_accuracy_avg:.2f})"
 
 
-async def _run_one(persona: str, scenario_id: str, seed: int, max_turns: int) -> dict | None:
-    try:
-        result = await run_episode(
-            persona=PersonaType(persona),
-            scenario_id=scenario_id,
-            inject_noise=random.random() < DIVERSITY_CONFIG["noise_injection_rate"],
-            force_drift=random.random() < DIVERSITY_CONFIG["drift_force_rate"],
-            seed=seed,
-            max_turns=max_turns,
-        )
-    except Exception as exc:
-        logger.warning("Episode failed (%s, %s): %s", persona, scenario_id, exc)
-        return None
+def _grade_proxy_from_record(record: dict) -> object:
+    return type(
+        "GradeProxy",
+        (),
+        {
+            "deal_efficiency": record["deal_efficiency"],
+            "termination_reason": record["termination_reason"],
+            "total_reward": record["reward"],
+            "drift_adapted": record["drift_adapted"],
+            "tom_accuracy_avg": record["tom_accuracy_avg"],
+        },
+    )()
 
+
+def _record_from_result(persona: str, scenario_id: str, result: EpisodeResult) -> dict:
     return {
         "prompt": result.system_prompt,
         "conversation": [{k: v for k, v in msg.items()} for msg in result.conversation],
@@ -77,6 +79,226 @@ async def _run_one(persona: str, scenario_id: str, seed: int, max_turns: int) ->
         "batna_seller": result.session.hidden_state.walk_away_price,
         "batna_buyer": result.session.hidden_state.budget_ceiling,
     }
+
+
+async def _run_episode_full(
+    persona: str, scenario_id: str, seed: int, max_turns: int
+) -> tuple[dict | None, EpisodeResult | None]:
+    try:
+        result = await run_episode(
+            persona=PersonaType(persona),
+            scenario_id=scenario_id,
+            inject_noise=random.random() < DIVERSITY_CONFIG["noise_injection_rate"],
+            force_drift=random.random() < DIVERSITY_CONFIG["drift_force_rate"],
+            seed=seed,
+            max_turns=max_turns,
+        )
+    except Exception as exc:
+        logger.warning("Episode failed (%s, %s): %s", persona, scenario_id, exc)
+        return None, None
+
+    return _record_from_result(persona, scenario_id, result), result
+
+
+async def _run_one(persona: str, scenario_id: str, seed: int, max_turns: int) -> dict | None:
+    record, _ = await _run_episode_full(persona, scenario_id, seed, max_turns)
+    return record
+
+
+def _classify_discard(grade, args) -> str:
+    """Single bucket per discarded episode (mutually exclusive)."""
+    if grade.deal_efficiency < args.min_efficiency:
+        return "low_efficiency_no_deal"
+    if grade.tom_accuracy_avg < 0.5:
+        return "tom_accuracy_below_threshold"
+    return "other"
+
+
+def _conversation_mentions_market(conversation: list[dict]) -> bool:
+    for msg in conversation:
+        for v in msg.values():
+            if isinstance(v, str) and "market" in v.lower():
+                return True
+    return False
+
+
+def _print_inspect_report(
+    coverage: dict[tuple[str, str], int],
+    total_pre: int,
+    kept: int,
+    discarded: int,
+    keep_reason_counts: Counter[str],
+    kept_records: list[dict],
+    kept_tom: list[bool],
+    kept_rewards: list[float],
+    kept_eff: list[float],
+    kept_tom_acc: list[float],
+    kept_turns: list[float],
+    div_drift: int,
+    div_market: int,
+    div_bluff: int,
+    div_zopa: int,
+    discard_by_label: Counter[str],
+) -> None:
+    n_k = max(kept, 1)
+    pct = lambda x: 100.0 * x / n_k
+    d_rate = 100.0 * discarded / max(total_pre, 1)
+
+    def st(values: list[float]) -> str:
+        if len(values) < 2:
+            return "0.00"
+        return f"{statistics.stdev(values):.2f}"
+
+    def mean_t(values: list[float]) -> str:
+        if not values:
+            return "0.00"
+        return f"{statistics.mean(values):.2f}"
+
+    mean_turns = statistics.mean(kept_turns) if kept_turns else 0.0
+
+    deal_n = sum(1 for r in kept_records if r.get("deal_reached"))
+    walk_n = keep_reason_counts.get("principled_walkaway", 0)
+    drift_n = keep_reason_counts.get("drift_adapted", 0)
+    tom5_n = sum(1 for t in kept_tom if t)
+
+    r1, r2, r3 = (
+        discard_by_label.get("low_efficiency_no_deal", 0),
+        discard_by_label.get("tom_accuracy_below_threshold", 0),
+        discard_by_label.get("other", 0),
+    )
+
+    _lw = 31
+    print()
+    print("=== QUALITY REPORT (60 episodes) ===")
+    print()
+    print("Coverage (persona × scenario):")
+    for persona, scenario_id in REQUIRED_COMBINATIONS:
+        n = coverage.get((persona, scenario_id), 0)
+        print(f"  {persona:8s} × {scenario_id:30s} : {n} episodes")
+    print()
+    print("Quality filter:")
+    print(f"  {'Total generated (before filter)':<{_lw}}: {total_pre}")
+    print(f"  {'Kept after filter':<{_lw}}: {kept}")
+    print(f"  {'Discarded':<{_lw}}: {discarded}")
+    print(f"  {'Discard rate':<{_lw}}: {d_rate:.1f}%")
+    print()
+    print("Kept episode breakdown:")
+    print(f"  Deal reached          : {deal_n:3d}  ({pct(deal_n):.1f}%)")
+    print(f"  Principled walkaway   : {walk_n:3d}  ({pct(walk_n):.1f}%)")
+    print(f"  Drift adapted         : {drift_n:3d}  ({pct(drift_n):.1f}%)")
+    print(f"  ToM accuracy >= 0.5   : {tom5_n:3d}  ({pct(tom5_n):.1f}%)")
+    print()
+    print("Reward stats (kept episodes only):")
+    print(f"  Mean cumulative reward : {mean_t(kept_rewards)}")
+    print(f"  Std cumulative reward  : {st(kept_rewards)}")
+    print(f"  Min                    : {min(kept_rewards) if kept_rewards else 0.0:.2f}")
+    print(f"  Max                    : {max(kept_rewards) if kept_rewards else 0.0:.2f}")
+    print(f"  Mean deal efficiency   : {mean_t(kept_eff)}")
+    print(f"  Mean ToM accuracy      : {mean_t(kept_tom_acc)}")
+    print(f"  Mean turns to close    : {mean_turns:.1f}")
+    print()
+    print("Diversity flags (kept episodes):")
+    print(
+        f"  {'Episodes with drift event':<{_lw}}: {div_drift:3d}  ({100.0 * div_drift / n_k:.1f}%)"
+    )
+    print(
+        f"  {'Episodes with market event':<{_lw}}: {div_market:3d}  ({100.0 * div_market / n_k:.1f}%)"
+    )
+    print(
+        f"  {'Episodes with bluff caught':<{_lw}}: {div_bluff:3d}  ({100.0 * div_bluff / n_k:.1f}%)"
+    )
+    print(
+        f"  {'Episodes with ZOPA erosion':<{_lw}}: {div_zopa:3d}  ({100.0 * div_zopa / n_k:.1f}%)"
+    )
+    print()
+    print("Top 3 discard reasons:")
+    print(f"  1. low_efficiency_no_deal      : {r1}")
+    print(f"  2. tom_accuracy_below_threshold: {r2}")
+    print(f"  3. other                       : {r3}")
+
+
+async def run_inspect_mode(args) -> None:
+    out_path = Path("training/data/inspect_run.jsonl")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    coverage: dict[tuple[str, str], int] = defaultdict(int)
+    keep_reason_counts: Counter[str] = Counter()
+    kept_records: list[dict] = []
+    kept_tom: list[bool] = []
+    kept_rewards: list[float] = []
+    kept_eff: list[float] = []
+    kept_tom_acc: list[float] = []
+    kept_turns: list[float] = []
+    div_drift = div_market = div_bluff = div_zopa = 0
+    discard_by_label: Counter[str] = Counter()
+    total_pre = 60
+    discarded = 0
+    seed = 0
+    n_inspect = 60
+
+    for i in range(n_inspect):
+        persona, scenario_id = REQUIRED_COMBINATIONS[i % len(REQUIRED_COMBINATIONS)]
+        record, res = await _run_episode_full(
+            persona, scenario_id, seed=seed, max_turns=args.max_turns
+        )
+        seed += 1
+        coverage[(persona, scenario_id)] += 1
+
+        if record is None or res is None:
+            discarded += 1
+            discard_by_label["other"] += 1
+            continue
+
+        g = res.grade
+        proxy = _grade_proxy_from_record(record)
+        keep, reason = is_quality_episode(proxy, args)
+        if not keep:
+            discarded += 1
+            discard_by_label[_classify_discard(g, args)] += 1
+            continue
+
+        keep_reason_counts[reason] += 1
+        kept_rewards.append(record["reward"])
+        kept_eff.append(record["deal_efficiency"])
+        kept_tom_acc.append(record["tom_accuracy_avg"])
+        kept_turns.append(float(res.session.step_count))
+        kept_tom.append(record["tom_accuracy_avg"] >= 0.5)
+        kept_records.append(record)
+
+        s = res.session
+        if s.drift_events_fired > 0:
+            div_drift += 1
+        if _conversation_mentions_market(res.conversation):
+            div_market += 1
+        if s.bluffs_caught > 0 or g.bluffs_caught > 0:
+            div_bluff += 1
+        if s.zopa_erosion_ticks > 0:
+            div_zopa += 1
+
+    with open(out_path, "w", encoding="utf-8") as out_f:
+        for r in kept_records:
+            out_f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+    _print_inspect_report(
+        coverage,
+        total_pre=total_pre,
+        kept=len(kept_records),
+        discarded=discarded,
+        keep_reason_counts=keep_reason_counts,
+        kept_records=kept_records,
+        kept_tom=kept_tom,
+        kept_rewards=kept_rewards,
+        kept_eff=kept_eff,
+        kept_tom_acc=kept_tom_acc,
+        kept_turns=kept_turns,
+        div_drift=div_drift,
+        div_market=div_market,
+        div_bluff=div_bluff,
+        div_zopa=div_zopa,
+        discard_by_label=discard_by_label,
+    )
+    print()
+    print(f"Kept episodes written to: {out_path.resolve()}")
 
 
 async def run_diversity_pass(args, output_path: Path) -> None:
@@ -108,17 +330,7 @@ async def run_diversity_pass(args, output_path: Path) -> None:
                     continue
 
                 keep, reason = is_quality_episode(
-                    type(
-                        "GradeProxy",
-                        (),
-                        {
-                            "deal_efficiency": record["deal_efficiency"],
-                            "termination_reason": record["termination_reason"],
-                            "total_reward": record["reward"],
-                            "drift_adapted": record["drift_adapted"],
-                            "tom_accuracy_avg": record["tom_accuracy_avg"],
-                        },
-                    )(),
+                    _grade_proxy_from_record(record),
                     args,
                 )
                 if not keep:
@@ -142,17 +354,7 @@ async def run_diversity_pass(args, output_path: Path) -> None:
                 if record is None:
                     continue
                 keep, reason = is_quality_episode(
-                    type(
-                        "GradeProxy",
-                        (),
-                        {
-                            "deal_efficiency": record["deal_efficiency"],
-                            "termination_reason": record["termination_reason"],
-                            "total_reward": record["reward"],
-                            "drift_adapted": record["drift_adapted"],
-                            "tom_accuracy_avg": record["tom_accuracy_avg"],
-                        },
-                    )(),
+                    _grade_proxy_from_record(record),
                     args,
                 )
                 if keep:
@@ -192,6 +394,11 @@ def main() -> None:
     )
     parser.add_argument("--google_api_key", type=str, default="")
     parser.add_argument("--max-turns", type=int, default=14)
+    parser.add_argument(
+        "--inspect",
+        action="store_true",
+        help="Run a fixed 60-episode quality diagnostic; writes training/data/inspect_run.jsonl",
+    )
     args = parser.parse_args()
 
     load_dotenv()
@@ -202,6 +409,10 @@ def main() -> None:
 
     if args.google_api_key:
         os.environ["GOOGLE_API_KEY"] = args.google_api_key
+
+    if args.inspect:
+        asyncio.run(run_inspect_mode(args))
+        return
 
     output_path = Path(args.output)
     asyncio.run(run_diversity_pass(args, output_path))
