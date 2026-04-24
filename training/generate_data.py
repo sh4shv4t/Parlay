@@ -270,7 +270,7 @@ async def run_inspect_mode(args) -> None:
         kept_records.append(record)
 
         s = res.session
-        if s.drift_events_fired > 0:
+        if record["drift_adapted"]:
             div_drift += 1
         if _conversation_mentions_market(res.conversation):
             div_market += 1

@@ -100,7 +100,8 @@ def compute_step_reward(
     if action.offer_amount is not None:
         prev_offer = state.offer_history[-1] if state.offer_history else action.offer_amount
         if action.offer_amount > prev_offer:
-            delta_v = max(0.0, (action.offer_amount - prev_offer) / 1000.0)
+            zopa_width = max(1.0, state.hidden_state.budget_ceiling - state.hidden_state.walk_away_price)
+            delta_v = max(0.0, (action.offer_amount - prev_offer) / zopa_width)
 
     tom_t = 0.0
     if next_state.belief_history:
