@@ -70,8 +70,6 @@ def tom_accuracy_reward(completions: list[str], **kwargs) -> list[float]:
     tom_signals: dict[str, list[str]] = {
         "shark":    ["deadline", "competitor", "alternative", "pressure", "offer expires"],
         "diplomat": ["relationship", "partnership", "mutual", "together", "trust"],
-        "analyst":  ["data", "evidence", "justif", "metric", "roi", "benchmark"],
-        "wildcard": ["feel", "sense", "flexible", "open to", "spontan"],
         "veteran":  ["experience", "seen this", "long-term", "trust", "patience"],
     }
     signals = tom_signals.get(persona.lower(), [])

@@ -666,6 +666,39 @@ body.demo-mode { padding-top: 30px; }
   background: var(--mahogany); border: 1px solid rgba(201,168,76,0.25);
   border-radius: 6px; padding: var(--space-md);
 }
+.tactical-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--gold);
+  margin-bottom: 8px;
+}
+.tactic-btn {
+  background: var(--mahogany);
+  color: var(--cream);
+  border: 1px solid var(--gold);
+  padding: 6px 14px;
+  font-family: 'EB Garamond', serif;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+.tactic-btn:hover:not(:disabled) {
+  background: var(--felt-light);
+}
+.tactic-btn.selected {
+  border-color: var(--gold-light);
+  box-shadow: 0 0 0 1px var(--gold-light);
+}
+.tactic-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.cp-cost {
+  font-size: 0.75rem;
+  color: var(--gold-light);
+  margin-left: 4px;
+}
 .input-main-row { display: flex; gap: var(--space-sm); margin-bottom: var(--space-sm); }
 .offer-input {
   flex: 1; background: var(--felt); border: 1px solid rgba(201,168,76,0.3);
@@ -829,6 +862,12 @@ body.demo-mode { padding-top: 30px; }
   display: flex; justify-content: space-between; align-items: center;
   margin-top: 22px;  /* extra space for labels below bar */
   font-family: var(--font-mono); font-size: 0.65rem; color: var(--smoke-light);
+}
+.zopa-width-indicator {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--gold-light);
 }
 
 /* ── Tension Meter — item 12 ───────────────────────────────────────────────── */

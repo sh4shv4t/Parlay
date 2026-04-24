@@ -15,9 +15,8 @@ from parlay_env.models import (
 from parlay_env.game_theory import compute_zopa, compute_nash_bargaining_solution
 from parlay_env.grader import grade_episode
 from game.scenarios import SCENARIOS, get_scenario
-from game.tactical_cards import TACTICAL_CARDS, draw_hand
+from game.tactical_cards import TACTICAL_CARDS, draw_hand, get_card
 from game.leaderboard import Leaderboard
-from game.achievements import AchievementSystem
 from agent.personas import PERSONAS, build_system_prompt
 from agent.gemini_client import MODEL_ID_DEMO, call_gemini
 from agent.tom_tracker import ToMTracker
@@ -36,7 +35,6 @@ mcp = FastMCP(
 # In-memory session store for MCP sessions
 _sessions: dict[str, dict] = {}
 _leaderboard = Leaderboard()
-_achievements = AchievementSystem()
 
 CP_START = 100
 CP_REGEN = 5
@@ -44,13 +42,9 @@ MAX_TURNS = 20
 
 # CP costs per tactical move
 _CP_COSTS: dict[TacticalMove, int] = {
-    TacticalMove.ANCHOR_HIGH:      0,
+    TacticalMove.ANCHOR_HIGH: 0,
     TacticalMove.BATNA_REVEAL:    20,
-    TacticalMove.COALITION_INVITE: 30,
-    TacticalMove.TIME_PRESSURE:   15,
-    TacticalMove.SWEETENER:       10,
     TacticalMove.SILENCE:          5,
-    TacticalMove.REFRAME:         12,
 }
 
 
@@ -78,9 +72,8 @@ async def start_negotiation(
     Start a new negotiation episode.
 
     Args:
-        scenario_id: One of: saas_enterprise, consulting_retainer,
-                     hiring_package, vendor_hardware, acquisition_term_sheet
-        persona: One of: shark, diplomat, analyst, wildcard, veteran
+        scenario_id: One of: saas_enterprise, hiring_package, acquisition_term_sheet
+        persona: One of: shark, diplomat, veteran
         player_name: Display name for the leaderboard (default: "Agent")
 
     Returns:
@@ -90,7 +83,7 @@ async def start_negotiation(
         available_cards: List of tactical cards available to the player.
         opening_message: The AI opponent's opening statement.
     """
-    valid_scenarios = [s.id for s in SCENARIOS]
+    valid_scenarios = list(SCENARIOS.keys())
     if scenario_id not in valid_scenarios:
         return {"error": f"Invalid scenario_id. Valid options: {valid_scenarios}"}
 
@@ -112,7 +105,7 @@ async def start_negotiation(
     )
 
     tom = ToMTracker(initial_belief, persona_type)
-    hand = draw_hand(5, rng_seed=hash(session_id) % 9999)
+    hand = draw_hand(3, rng_seed=hash(session_id) % 9999)
 
     system_prompt = build_system_prompt(
         persona=persona_type,
@@ -143,7 +136,6 @@ async def start_negotiation(
         "step_count": 0,
         "cumulative_reward": 0.0,
         "credibility_points": CP_START,
-        "act": 1,
         "done": False,
         "hand": [m.value for m in hand],
         "drift_adapted": False,
@@ -160,7 +152,6 @@ async def start_negotiation(
             "zopa_upper": zopa[1] if zopa else 0,
             "nash_point": nash,
             "credibility_points": CP_START,
-            "act": 1,
             "tension_score": 10.0,
             "belief_state": initial_belief.model_dump(),
         },
@@ -175,9 +166,9 @@ async def start_negotiation(
         "available_cards": [
             {
                 "move": m,
-                "name": TACTICAL_CARDS[TacticalMove(m)].name,
-                "cp_cost": TACTICAL_CARDS[TacticalMove(m)].cp_cost,
-                "description": TACTICAL_CARDS[TacticalMove(m)].description,
+                "name": get_card(m).name,
+                "cp_cost": get_card(m).cp_cost,
+                "description": get_card(m).description,
             }
             for m in _sessions[session_id]["hand"]
         ],
@@ -200,8 +191,7 @@ async def make_offer(
         amount: Offer amount in the scenario's currency.
         message: Natural language message accompanying the offer.
         tactical_move: Optional tactical card to play. One of:
-                       anchor_high, batna_reveal, coalition_invite,
-                       time_pressure, sweetener, silence, reframe
+                       anchor_high, batna_reveal, silence
 
     Returns:
         opponent_response: AI opponent's counter-message and offer.
@@ -325,7 +315,6 @@ async def make_offer(
             "tension_score": tension,
             "belief_state": updated_belief.model_dump(),
             "credibility_points": new_cp,
-            "act": sess["act"],
         },
         "reward": step_reward,
         "cumulative_reward": sess["cumulative_reward"],
@@ -363,7 +352,6 @@ async def get_game_state(session_id: str) -> dict:
         "scenario_id": sess["scenario_id"],
         "persona": sess["persona"],
         "step_count": sess["step_count"],
-        "act": sess["act"],
         "done": sess["done"],
         "offer_history": sess["offer_history"],
         "zopa": {"lower": zopa[0] if zopa else 0, "upper": zopa[1] if zopa else 0},
@@ -391,7 +379,6 @@ async def accept_deal(session_id: str) -> dict:
         final_reward: Complete reward breakdown (step + terminal).
         deal_efficiency: Fraction of ZOPA captured [0, 1].
         nash_comparison: How the deal compares to Nash Bargaining Solution.
-        achievements: List of achievements earned.
         episode_summary: Full grade breakdown.
     """
     if session_id not in _sessions:
@@ -410,7 +397,6 @@ async def accept_deal(session_id: str) -> dict:
         session_id=session_id,
         scenario_id=sess["scenario_id"],
         persona=PersonaType(sess["persona"]),
-        act=sess["act"],
         step_count=sess["step_count"],
         cumulative_reward=sess["cumulative_reward"],
         hidden_state=hidden,
@@ -437,19 +423,8 @@ async def accept_deal(session_id: str) -> dict:
         persona=sess["persona"],
         total_reward=grade.total_reward,
         deal_efficiency=grade.deal_efficiency,
-        acts_completed=grade.acts_completed,
+        acts_completed=1,
         deal_closed=True,
-    )
-
-    earned = _achievements.evaluate(
-        deal_closed=True,
-        deal_efficiency=grade.deal_efficiency,
-        t_close=sess["step_count"],
-        tom_accuracy_avg=grade.tom_accuracy_avg,
-        drift_adapted=sess["drift_adapted"],
-        bluffs_caught=sess["tom"].bluffs_detected,
-        acts_completed=grade.acts_completed,
-        persona=sess["persona"],
     )
 
     sess["done"] = True
@@ -473,16 +448,11 @@ async def accept_deal(session_id: str) -> dict:
             "your_deal": final_price,
             "vs_nash_pct": round((final_price - nash) / max(zopa_width, 1) * 100, 1),
         },
-        "achievements": [
-            {"id": a.id, "name": a.name, "icon": a.icon, "xp": a.xp_reward}
-            for a in earned
-        ],
         "episode_summary": {
             "total_reward": grade.total_reward,
             "deal_efficiency": grade.deal_efficiency,
             "tom_accuracy_avg": grade.tom_accuracy_avg,
             "bluffs_caught": grade.bluffs_caught,
-            "acts_completed": grade.acts_completed,
             "drift_adapted": grade.drift_adapted,
         },
     }
@@ -513,7 +483,6 @@ async def walk_away(session_id: str) -> dict:
         session_id=session_id,
         scenario_id=sess["scenario_id"],
         persona=PersonaType(sess["persona"]),
-        act=sess["act"],
         step_count=sess["step_count"],
         cumulative_reward=sess["cumulative_reward"],
         hidden_state=hidden,
@@ -540,7 +509,6 @@ async def walk_away(session_id: str) -> dict:
         "episode_summary": {
             "total_reward": grade.total_reward,
             "deal_efficiency": 0.0,
-            "acts_completed": grade.acts_completed,
         },
         "counterfactual": {
             "optimal_deal": nash,
@@ -570,7 +538,7 @@ async def get_leaderboard(
         total_entries: Total number of entries in this leaderboard.
     """
     limit = min(max(1, limit), 50)
-    valid_scenarios = [s.id for s in SCENARIOS]
+    valid_scenarios = list(SCENARIOS.keys())
     if scenario_id and scenario_id not in valid_scenarios:
         return {"error": f"Invalid scenario_id. Valid: {valid_scenarios}"}
 
@@ -608,7 +576,7 @@ async def list_scenarios() -> dict:
                     for e in s.drift_events
                 ],
             }
-            for s in SCENARIOS
+            for s in SCENARIOS.values()
         ]
     }
 

@@ -83,6 +83,15 @@ async def serve_train() -> FileResponse:
     )
 
 
+@app.get("/spectate", include_in_schema=False)
+async def serve_spectate() -> FileResponse:
+    """Serve the spectator dashboard."""
+    return FileResponse(
+        "dashboard/spectate.html",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
 @app.get("/favicon.ico", include_in_schema=False, response_model=None)
 async def favicon():
     """

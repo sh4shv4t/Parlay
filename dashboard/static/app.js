@@ -21,12 +21,12 @@ let gameState = {
   cp:           100,
   maxCp:        100,
   currentAct:   1,
-  actsCompleted: 0,
-  actTranscripts: { 1: [], 2: [], 3: [] },
+  actTranscripts: { 1: [] },
   lastPlayerOffer: null,
   lastOpponentOffer: null,
   pendingAiDeal:  false,   // AI has offered a deal, awaiting player response
   stepperAmount:  145000,  // current stepper value
+  selectedTactic: null,
 };
 
 let character      = null;
@@ -63,6 +63,10 @@ document.addEventListener("DOMContentLoaded", () => {
   if (chipWalk) chipWalk.addEventListener("click", walkAway);
   const chipOffer = document.getElementById("chip-offer");
   if (chipOffer) chipOffer.addEventListener("click", _toggleOfferStepper);
+
+  document.querySelectorAll(".tactic-btn").forEach((btn) => {
+    btn.addEventListener("click", () => _toggleTacticButton(btn));
+  });
 
   // Stepper controls
   document.getElementById("stepper-down")?.addEventListener("click", () => _stepOffer(-5000));
@@ -218,10 +222,10 @@ async function startGame(scenarioId, persona, playerName) {
   gameState.done       = false;
   gameState.turnCount  = 0;
   gameState.currentAct = 1;
-  gameState.actsCompleted = 0;
   gameState.lastPlayerOffer   = null;
   gameState.lastOpponentOffer = null;
   gameState.pendingAiDeal = false;
+  gameState.selectedTactic = null;
 
   try {
     const res = await fetch(`${API_BASE}/api/game/start`, {
@@ -339,8 +343,6 @@ function _dismissBriefing() {
     const mockOpeners = {
       shark:    "Let's not waste each other's time. What's your opening number?",
       diplomat: "I believe we can find a solution that works for both of us. Shall we begin?",
-      analyst:  "I've reviewed the market data. Let's start with the numbers.",
-      wildcard: "You know what, I feel good about today. Let's just see where this goes.",
       veteran:  "I've been in rooms like this before. Let's get to it.",
     };
     addMessage("opponent", mockOpeners[persona] || "Let's begin.", null, null);
@@ -350,9 +352,7 @@ function _dismissBriefing() {
 function _mockStartData(scenarioId, persona, playerName) {
   const mockScenarios = {
     saas_enterprise:        { id: "saas_enterprise",        title: "Enterprise SaaS Contract",   zopa_lower: 125000,   zopa_upper: 165000   },
-    consulting_retainer:    { id: "consulting_retainer",    title: "Consulting Retainer",         zopa_lower: 25000,    zopa_upper: 40000    },
     hiring_package:         { id: "hiring_package",         title: "Senior Engineer Offer",       zopa_lower: 195000,   zopa_upper: 230000   },
-    vendor_hardware:        { id: "vendor_hardware",        title: "Hardware Vendor Contract",    zopa_lower: 1750000,  zopa_upper: 2200000  },
     acquisition_term_sheet: { id: "acquisition_term_sheet", title: "Startup Acquisition",         zopa_lower: 10500000, zopa_upper: 16000000 },
   };
   const s = mockScenarios[scenarioId] || mockScenarios.saas_enterprise;
@@ -364,7 +364,7 @@ function _mockStartData(scenarioId, persona, playerName) {
     scenario: s,
     observation: {
       step_count: 0, zopa_lower: s.zopa_lower, zopa_upper: s.zopa_upper,
-      nash_point: nash, tension_score: 10, credibility_points: 100, act: 1,
+      nash_point: nash, tension_score: 10, credibility_points: 100, zopa_width_pct_remaining: 1.0,
       belief_state: { cooperative: 0.5, competitive: 0.5,
                       reservation: s.zopa_lower / s.zopa_upper, flexibility: 0.5 },
     },
@@ -380,10 +380,9 @@ async function submitMove() {
   if (gameState.done || !gameState.sessionId) return;
 
   const offerInput = document.getElementById("offer-input");
-  const cardEl     = document.querySelector(".tactic-chip.selected");
 
   const raw    = offerInput?.value.trim() ?? "";
-  const cardId = cardEl?.dataset.cardId ?? null;
+  const cardId = gameState.selectedTactic;
   const offer  = raw ? parseFloat(raw.replace(/[$,]/g, "")) : null;
 
   if (offer !== null && isNaN(offer)) return;
@@ -446,8 +445,8 @@ async function submitMove() {
     if (gameState.done) _handleGameOver(data);
 
     if (offerInput) offerInput.value = "";
-    cardEl?.classList.remove("selected");
-    _renderTacticChips(gameState.hand);
+    gameState.selectedTactic = null;
+    _updateTacticalButtons();
 
   } catch (e) {
     _removeThinkingBubble(thinkId);
@@ -577,16 +576,8 @@ async function acceptDeal() {
     gameState.done = true;
     updateUI(data);
 
-    const obs = data.observation || gameState.observation || {};
     const finalPrice = data.final_price ?? data.deal_amount ?? dealAmount;
-    const act = gameState.currentAct;
-
-    // If not final act, show act transition — item 21
-    if (act < 3) {
-      _showActTransition(act, finalPrice, obs);
-    } else {
-      _handleGameOver({ ...data, deal_reached: true, deal_amount: finalPrice });
-    }
+    _handleGameOver({ ...data, deal_reached: true, deal_amount: finalPrice });
   } catch (e) {
     _removeThinkingBubble(thinkId);
     _showError(e.message);
@@ -766,7 +757,7 @@ function _buildWalkAwayReasons(obs, data) {
 
 // ── Board interject — item 25 ──────────────────────────────────
 function _checkBoardInterject() {
-  if (gameState.currentAct !== 3) return;
+  return;
   const turns = gameState._boardInterjectionTurns || [];
   const idx = turns.indexOf(gameState.turnCount);
   if (idx === -1) return;
@@ -873,17 +864,13 @@ function updateUI(response) {
   const tension = obs?.tension_score ?? obs?.tension ?? 0;
   updateTensionMeter(tension);
   updateCPBar(gameState.cp);
+  _updateTacticalButtons();
 
   const drift = response.drift_event || obs?.drift_event;
   if (drift) showDriftAlert(drift);
 
-  const act = obs?.current_act ?? obs?.act ?? gameState.currentAct ?? 1;
+  const act = 1;
   _updateActPills(act);
-
-  if (gameState.hand && gameState.hand.length > 0) {
-    renderHand(gameState.hand);
-    _renderTacticChips(gameState.hand);
-  }
 
   if (charts && obs) {
     const playerOffer   = obs.player_offer   ?? obs.your_offer  ?? null;
@@ -893,9 +880,6 @@ function updateUI(response) {
     }
     if (obs.belief_state) charts.updateBeliefChart?.call(charts, obs.belief_state);
   }
-
-  const achievements = response.achievements || obs?.achievements;
-  if (achievements) showAchievements(achievements);
 
   const avatarEl = document.getElementById("player-avatar");
   if (avatarEl && gameState.playerName) avatarEl.textContent = gameState.playerName.charAt(0).toUpperCase();
@@ -937,9 +921,11 @@ function updateCharacterFromGameState(obs) {
 function _updateScenarioHeader(data) {
   const titleEl = document.getElementById("scenario-title");
   const metaEl  = document.getElementById("scenario-meta");
+  const sessionEl = document.getElementById("session-id-label");
   const sc = data.scenario || {};
   if (titleEl) titleEl.textContent = sc.title || data.scenario_id || "Negotiation";
   if (metaEl)  metaEl.textContent  = sc.description || "";
+  if (sessionEl) sessionEl.textContent = `Session: ${gameState.sessionId || data.session_id || "—"}`;
 }
 
 function _updatePersonaPanel(data) {
@@ -1024,7 +1010,7 @@ function addMessage(role, text, offer, move) {
   thread.appendChild(bubble);
 
   // Save to act transcript — item 26
-  const actKey = gameState.currentAct;
+  const actKey = 1;
   if (!gameState.actTranscripts[actKey]) gameState.actTranscripts[actKey] = [];
   gameState.actTranscripts[actKey].push({ role, text, offer, move });
 
@@ -1088,6 +1074,28 @@ function _renderTacticChips(hand) {
   });
 }
 
+function _toggleTacticButton(button) {
+  const cardId = button?.dataset.card || null;
+  if (!cardId || button.disabled) return;
+  gameState.selectedTactic = gameState.selectedTactic === cardId ? null : cardId;
+  _updateTacticalButtons();
+}
+
+function _updateTacticalButtons() {
+  document.querySelectorAll(".tactic-btn").forEach((btn) => {
+    const cost = Number(btn.dataset.cost || "0");
+    const cardId = btn.dataset.card || "";
+    btn.disabled = gameState.done || gameState.cp < cost || !gameState.sessionId;
+    btn.classList.toggle("selected", gameState.selectedTactic === cardId);
+  });
+}
+
+function getZopaColor(pctRemaining) {
+  if (pctRemaining > 0.7) return "var(--gold)";
+  if (pctRemaining > 0.4) return "#c8860a";
+  return "var(--scarlet)";
+}
+
 // ── ZOPA Bar — item 10 ─────────────────────────────────────────
 function updateZOPABar(observation) {
   const track = document.getElementById("zopa-track");
@@ -1098,6 +1106,8 @@ function updateZOPABar(observation) {
   const playerOffer   = observation.player_offer   ?? observation.your_offer   ?? null;
   const opponentOffer = observation.opponent_offer ?? null;
   const nash          = observation.nash_point     ?? null;
+  const pctRemaining  = observation.zopa_width_pct_remaining ?? 1.0;
+  const zopaColor     = getZopaColor(pctRemaining);
 
   const minVal = Math.min(batnaPlayer, batnaOpponent) * 0.9;
   const maxVal = Math.max(batnaPlayer, batnaOpponent) * 1.1;
@@ -1110,7 +1120,11 @@ function updateZOPABar(observation) {
     const hi = Math.max(batnaPlayer, batnaOpponent);
     zopaZone.style.left  = pct(lo);
     zopaZone.style.width = `${(((hi - lo) / range) * 100).toFixed(1)}%`;
+    zopaZone.style.background = zopaColor;
+    zopaZone.style.borderLeftColor = zopaColor;
+    zopaZone.style.borderRightColor = zopaColor;
   }
+  track.style.borderColor = zopaColor;
 
   const mPlayer = document.getElementById("marker-player");
   if (mPlayer) mPlayer.style.left = pct(batnaPlayer);
@@ -1137,8 +1151,10 @@ function updateZOPABar(observation) {
 
   const lblLow  = document.getElementById("zopa-label-low");
   const lblHigh = document.getElementById("zopa-label-high");
+  const widthEl = document.getElementById("zopa-width-indicator");
   if (lblLow)  lblLow.textContent  = formatCurrency(minVal, "USD");
   if (lblHigh) lblHigh.textContent = formatCurrency(maxVal, "USD");
+  if (widthEl) widthEl.textContent = `Deal zone: ${Math.round(pctRemaining * 100)}%`;
 }
 
 // ── Tension Meter — item 12 ────────────────────────────────────
@@ -1258,11 +1274,7 @@ function renderHand(hand) {
   const CARD_DESCS = {
     anchor_high:      "Set a bold opening number to frame the negotiation.",
     batna_reveal:     "Reveal your walk-away option to signal credibility.",
-    coalition_invite: "Bring in a third-party ally to shift the balance.",
-    time_pressure:    "Create urgency to accelerate the opponent's decision.",
-    sweetener:        "Add a non-cash perk to make the deal more attractive.",
     silence:          "Say nothing — let the pressure work for you.",
-    reframe:          "Change the narrative to shift negotiating ground.",
   };
 
   hand.forEach((card) => {
@@ -1467,9 +1479,7 @@ function _renderScenarioDossiers(scenarios) {
 
   const defaults = [
     { id: "saas_enterprise",        title: "Enterprise SaaS",       description: "500-seat analytics platform",   zopa_lower: 125000,   zopa_upper: 165000,   difficulty: 2 },
-    { id: "consulting_retainer",    title: "Consulting Retainer",   description: "Monthly strategy retainer",     zopa_lower: 25000,    zopa_upper: 40000,    difficulty: 1 },
     { id: "hiring_package",         title: "Senior Eng. Offer",     description: "Total comp negotiation",        zopa_lower: 195000,   zopa_upper: 230000,   difficulty: 2 },
-    { id: "vendor_hardware",        title: "Hardware Contract",     description: "200-unit bulk purchase",        zopa_lower: 1750000,  zopa_upper: 2200000,  difficulty: 3 },
     { id: "acquisition_term_sheet", title: "Startup Acquisition",   description: "Acqui-hire term sheet",         zopa_lower: 10500000, zopa_upper: 16000000, difficulty: 3 },
   ];
 
@@ -1531,8 +1541,6 @@ function _renderPersonaCards(personas) {
   const defaults = [
     { id: "shark",    name: "The Shark",    symbol: "◈", aggression: 0.88, patience: 0.18 },
     { id: "diplomat", name: "The Diplomat", symbol: "◎", aggression: 0.20, patience: 0.85 },
-    { id: "analyst",  name: "The Analyst",  symbol: "◻", aggression: 0.35, patience: 0.90 },
-    { id: "wildcard", name: "The Wildcard", symbol: "◇", aggression: 0.60, patience: 0.25 },
     { id: "veteran",  name: "The Veteran",  symbol: "◆", aggression: 0.50, patience: 0.95 },
   ];
 
@@ -1647,26 +1655,22 @@ function _setInputsDisabled(disabled) {
 }
 
 function _personaLabel(persona) {
-  const labels = { shark: "The Shark", diplomat: "The Diplomat",
-                   analyst: "The Analyst", wildcard: "The Wildcard", veteran: "The Veteran" };
+  const labels = { shark: "The Shark", diplomat: "The Diplomat", veteran: "The Veteran" };
   return labels[persona] || persona;
 }
 
 function _personaSymbol(persona) {
-  const syms = { shark: "◈", diplomat: "◎", analyst: "◻", wildcard: "◇", veteran: "◆" };
+  const syms = { shark: "◈", diplomat: "◎", veteran: "◆" };
   return syms[persona] || "◈";
 }
 
 function _personaColor(persona) {
-  const cols = { shark: "var(--scarlet-light)", diplomat: "var(--emerald)",
-                 analyst: "var(--parlay-blue)", wildcard: "var(--gold)", veteran: "var(--parlay-purple)" };
+  const cols = { shark: "var(--scarlet-light)", diplomat: "var(--emerald)", veteran: "var(--parlay-purple)" };
   return cols[persona] || "var(--gold)";
 }
 
 function _personaTag(persona) {
-  const tags = { shark: "Aggressive · Low A", diplomat: "Cooperative · High A",
-                 analyst: "Analytical · Data-driven", wildcard: "Unpredictable · High Variance",
-                 veteran: "Experienced · Patient" };
+  const tags = { shark: "Aggressive · Low A", diplomat: "Cooperative · High A", veteran: "Experienced · Patient" };
   return tags[persona] || "Negotiator";
 }
 

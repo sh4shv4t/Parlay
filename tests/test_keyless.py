@@ -25,10 +25,12 @@ from parlay_env.game_theory import (
     compute_shapley_value,
 )
 from parlay_env.grader import compute_step_reward, compute_terminal_reward
-from parlay_env.reward import OMEGA
+from parlay_env.grader import detect_bluff_challenge
+from parlay_env.reward import OMEGA, PSI
 from parlay_env.models import (
     BeliefState, HiddenState, ParlayAction, ParlayState, PersonaType,
 )
+from dashboard.api import _apply_zopa_erosion
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -61,7 +63,6 @@ def parlay_state(hidden, belief) -> ParlayState:
         session_id="test-session",
         scenario_id="saas_enterprise",
         persona=PersonaType.SHARK,
-        act=1,
         step_count=0,
         cumulative_reward=0.0,
         hidden_state=hidden,
@@ -101,7 +102,7 @@ class TestHealthEndpoint:
 
 class TestListScenarios:
     def test_list_scenarios(self):
-        """GET /api/scenarios returns exactly 5 scenarios."""
+        """GET /api/scenarios returns exactly 3 scenarios."""
         async def _run():
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -109,14 +110,14 @@ class TestListScenarios:
             assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
             data = resp.json()
             scenarios = data.get("scenarios", [])
-            assert len(scenarios) == 5, f"Expected 5 scenarios, got {len(scenarios)}"
+            assert len(scenarios) == 3, f"Expected 3 scenarios, got {len(scenarios)}"
 
         asyncio.get_event_loop().run_until_complete(_run())
 
 
 class TestListPersonas:
     def test_list_personas(self):
-        """GET /api/personas returns exactly 5 personas."""
+        """GET /api/personas returns exactly 3 personas."""
         async def _run():
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -124,7 +125,7 @@ class TestListPersonas:
             assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
             data = resp.json()
             personas = data.get("personas", [])
-            assert len(personas) == 5, f"Expected 5 personas, got {len(personas)}"
+            assert len(personas) == 3, f"Expected 3 personas, got {len(personas)}"
 
         asyncio.get_event_loop().run_until_complete(_run())
 
@@ -180,6 +181,58 @@ class TestGrader:
         """Deal below BATNA (125000) returns -OMEGA terminal reward."""
         result = compute_terminal_reward(parlay_state, final_price=100_000.0, t_close=10)
         assert result == -OMEGA, f"Expected -{OMEGA}, got {result}"
+
+    def test_bluff_detection_bonus_keyless(self, parlay_state):
+        """Challenging a large BATNA bluff earns the PSI bonus."""
+        parlay_state.hidden_state.last_stated_batna = 198_000.0
+        action = ParlayAction(
+            utterance="I don't believe that's your walk-away.",
+            tactical_move=None,
+        )
+        next_state = ParlayState(
+            **{**parlay_state.model_dump(), "step_count": 1}
+        )
+        caught = detect_bluff_challenge(action.utterance, 198_000.0, 165_000.0)
+        reward = compute_step_reward(parlay_state, action, next_state)
+        assert caught is True, f"Expected True, got {caught}"
+        assert reward >= PSI, f"Expected at least {PSI}, got {reward}"
+
+    def test_zopa_collapse_walkaway_keyless(self):
+        """Repeated high tension collapses the ZOPA and forces walk-away."""
+        hidden = HiddenState(
+            budget_ceiling=103.0,
+            walk_away_price=100.0,
+            urgency_score=0.5,
+            has_alternative=False,
+            persona_drifted=False,
+        )
+        belief = BeliefState(
+            est_budget=102.0,
+            est_walk_away=101.0,
+            est_urgency=0.5,
+            est_has_alternative=False,
+            confidence=0.5,
+        )
+        state = ParlayState(
+            session_id="collapse-test",
+            scenario_id="saas_enterprise",
+            persona=PersonaType.SHARK,
+            step_count=0,
+            cumulative_reward=0.0,
+            hidden_state=hidden,
+            belief_history=[belief],
+            offer_history=[],
+            drift_events_fired=0,
+            episode_done=False,
+            credibility_points=100,
+            original_zopa_width=3.0,
+        )
+        while not state.walk_away and state.zopa_erosion_ticks < 100:
+            state.tension_score = 80.0
+            state.high_tension_streak = 2
+            _apply_zopa_erosion(state)
+        assert state.zopa_erosion_ticks >= 1, f"Expected >=1, got {state.zopa_erosion_ticks}"
+        assert state.termination_reason == "zopa_collapsed", f"Expected zopa_collapsed, got {state.termination_reason}"
 
 
 # ── Part 4: Database ──────────────────────────────────────────────────────────

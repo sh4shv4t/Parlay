@@ -341,26 +341,101 @@ def plot_results(results: dict, output_dir: Path) -> None:
     print(f"{'='*50}")
 
 
+def _annotate_turn(turn: dict) -> dict:
+    annotated = {"role": turn.get("role", "agent"), "text": turn.get("content", "")}
+    content = str(turn.get("content", "")).lower()
+    offer = turn.get("offer")
+    if offer is not None and isinstance(offer, (int, float)) and offer < 125_000:
+        annotated["is_bad"] = True
+        annotated["annotation"] = "BATNA breach risk"
+    elif "understand" in content or "closer" in content or "halfway" in content:
+        annotated["is_good"] = True
+        annotated["annotation"] = "Adaptive negotiation move"
+    elif turn.get("move") == "anchor_high":
+        annotated["annotation"] = "Anchor high"
+    else:
+        annotated["annotation"] = "Opening offer" if annotated["role"] == "player" else "Negotiation response"
+    return annotated
+
+
+def _save_transcript_artifact(data_path: str, output_dir: Path) -> None:
+    records: list[dict] = []
+    with open(data_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                records.append(json.loads(line))
+
+    combo_groups: dict[tuple[str, str], list[dict]] = {}
+    for record in records:
+        combo_groups.setdefault((record.get("persona", ""), record.get("scenario_id", "")), []).append(record)
+
+    chosen_base = None
+    chosen_grpo = None
+    for combo_records in combo_groups.values():
+        if len(combo_records) < 2:
+            continue
+        combo_sorted = sorted(combo_records, key=lambda rec: rec.get("reward", 0.0))
+        base_candidate = combo_sorted[0]
+        grpo_candidate = combo_sorted[-1]
+        if chosen_base is None or base_candidate.get("reward", 0.0) < chosen_base.get("reward", 0.0):
+            chosen_base = base_candidate
+            chosen_grpo = grpo_candidate
+
+    if chosen_base is None or chosen_grpo is None:
+        return
+
+    payload = {
+        "base": {
+            "total_reward": chosen_base.get("reward", 0),
+            "turns": [_annotate_turn(turn) for turn in chosen_base.get("conversation", [])],
+        },
+        "grpo": {
+            "total_reward": chosen_grpo.get("reward", 0),
+            "turns": [_annotate_turn(turn) for turn in chosen_grpo.get("conversation", [])],
+        },
+    }
+    with open(output_dir / "before_after_transcript.json", "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate Parlay training pipeline")
     parser.add_argument("--base", default="Qwen/Qwen2.5-7B-Instruct")
     parser.add_argument("--sft", default="models/parlay-sft")
     parser.add_argument("--grpo", default="models/parlay-grpo")
+    parser.add_argument("--base_model", default="")
+    parser.add_argument("--sft_checkpoint", default="")
+    parser.add_argument("--grpo_checkpoint", default="")
     parser.add_argument("--data", default="data/episodes.jsonl")
     parser.add_argument("--output", default="results/eval_results.json")
     parser.add_argument("--n", type=int, default=50)
+    parser.add_argument("--env_port", type=int, default=8001)
+    parser.add_argument("--save_transcript", action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    results = asyncio.run(compare_models(args.base, args.sft, args.grpo, args.n, args.data))
+    base = args.base_model or args.base
+    sft = args.sft_checkpoint or args.sft
+    grpo = args.grpo_checkpoint or args.grpo
+    results = asyncio.run(compare_models(base, sft, grpo, args.n, args.data))
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    summary = {
+        **results,
+        "base_mean_reward": results["base"]["mean_reward"],
+        "sft_mean_reward": results["sft"]["mean_reward"],
+        "grpo_mean_reward": results["grpo"]["mean_reward"],
+        "env_port": args.env_port,
+    }
     with open(output_path, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(summary, f, indent=2)
     logger.info(f"Results saved to {output_path}")
 
     plot_results(results, output_path.parent)
+    if args.save_transcript:
+        _save_transcript_artifact(args.data, output_path.parent)
 
 
 if __name__ == "__main__":

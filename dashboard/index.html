@@ -100,7 +100,7 @@
 <main class="app-body" role="main">
 
   <!-- LEFT COLUMN -->
-  <aside class="col-left" aria-label="Player info and hand">
+  <aside class="col-left" aria-label="Player info">
 
     <!-- Player Card -->
     <section class="player-card panel" aria-label="Player card">
@@ -127,68 +127,17 @@
       </div>
     </section>
 
-    <!-- Tactical Hand — item 14 (cards above input) -->
-    <section class="panel" aria-label="Tactical hand">
-      <div class="panel-header">
-        <span class="panel-title">
-          <span class="gloss-wrap">Tactical Hand
-            <span class="gloss-icon" aria-label="What is the Tactical Hand?">ⓘ</span>
-            <span class="gloss-tip" role="tooltip">Strategic moves drawn from game theory. Each costs Credibility Points to play.</span>
-          </span>
-        </span>
-        <span class="text-xs text-muted">Hover to reveal</span>
-      </div>
-      <div id="hand-container" class="hand-container">
-        <div class="empty-state">
-          <div class="empty-state-icon">🃏</div>
-          Start a game to draw your hand.
-        </div>
-      </div>
-    </section>
-
-    <!-- Achievements -->
-    <section class="panel" aria-label="Achievements">
-      <div class="panel-header"><span class="panel-title">Achievements</span></div>
-      <div class="achievements-strip">
-        <div class="badge" data-achievement="first_deal" title="Close your first deal">
-          <span class="badge-icon" aria-hidden="true">🤝</span>First Deal
-        </div>
-        <div class="badge" data-achievement="anchor_master" title="Win with an aggressive anchor">
-          <span class="badge-icon" aria-hidden="true">⚓</span>Anchor
-        </div>
-        <div class="badge" data-achievement="drift_adapter" title="Adapt to a drift event">
-          <span class="badge-icon" aria-hidden="true">🌪️</span>Drift
-        </div>
-        <div class="badge" data-achievement="zopa_optimal" title="Close within 5% of Nash point">
-          <span class="badge-icon" aria-hidden="true">💎</span>Optimal
-        </div>
-        <div class="badge" data-achievement="clean_sweep" title="Complete all 3 acts">
-          <span class="badge-icon" aria-hidden="true">🏆</span>Sweep
-        </div>
-        <div class="badge" data-achievement="bluffer" title="Successfully bluff the opponent">
-          <span class="badge-icon" aria-hidden="true">🃏</span>Bluff
-        </div>
-      </div>
-    </section>
-
   </aside>
 
   <!-- CENTER COLUMN -->
   <section class="col-center" aria-label="Negotiation arena">
 
-    <!-- Scenario Header + Act Pills -->
+    <!-- Scenario Header -->
     <div class="scenario-header" id="scenario-header">
       <div>
         <div id="scenario-title" class="scenario-title">Waiting for game…</div>
         <div id="scenario-meta" class="scenario-meta text-muted">Select a scenario to begin</div>
-      </div>
-      <!-- Act pills — item 26 -->
-      <div class="act-pills" aria-label="Negotiation acts">
-        <span id="act-pill-1" class="act-pill active" aria-label="Act I — Price">I · Price</span>
-        <span id="act-pill-2" class="act-pill locked" aria-label="Act II — Terms"
-              data-lock-msg="Complete Act I first">II · Terms</span>
-        <span id="act-pill-3" class="act-pill locked" aria-label="Act III — Coalition"
-              data-lock-msg="Complete Act II first">III · Coalition</span>
+        <div id="session-id-label" class="scenario-meta text-muted">Session: —</div>
       </div>
     </div>
 
@@ -246,9 +195,17 @@
 
     <!-- Input Area — item 14 (simplified) -->
     <div class="input-area" role="form" aria-label="Your move">
-
-      <!-- Tactic chips row (scrollable, above text input) -->
-      <div id="tactic-chips-row" class="tactic-chips-row" aria-label="Tactical cards"></div>
+      <div id="tactical-buttons" class="tactical-bar">
+        <button class="tactic-btn" data-card="anchor_high" data-cost="0" type="button">
+          ⚓ Anchor High <span class="cp-cost">0 CP</span>
+        </button>
+        <button class="tactic-btn" data-card="batna_reveal" data-cost="20" type="button">
+          🃏 BATNA Reveal <span class="cp-cost">20 CP</span>
+        </button>
+        <button class="tactic-btn" data-card="silence" data-cost="5" type="button">
+          🤫 Silence <span class="cp-cost">5 CP</span>
+        </button>
+      </div>
 
       <!-- Main text input -->
       <div class="input-main-row">
@@ -335,6 +292,7 @@
         </span>
         <span id="zopa-label-high">$100K</span>
       </div>
+      <div id="zopa-width-indicator" class="zopa-width-indicator">Deal zone: 100%</div>
     </section>
 
     <!-- Tension Meter — item 12 -->

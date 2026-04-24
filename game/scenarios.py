@@ -28,8 +28,8 @@ class Scenario:
     difficulty: int = 2  # 1=easy, 2=medium, 3=hard
 
 
-SCENARIOS: list[Scenario] = [
-    Scenario(
+SCENARIOS: dict[str, Scenario] = {
+    "saas_enterprise": Scenario(
         id="saas_enterprise",
         title="Enterprise SaaS Contract",
         description="500-seat analytics platform. Buyer has two competing bids.",
@@ -44,20 +44,7 @@ SCENARIOS: list[Scenario] = [
                        effect_on_urgency=0.4, effect_on_has_alternative=False),
         ],
     ),
-    Scenario(
-        id="consulting_retainer",
-        title="Consulting Retainer",
-        description="Monthly strategy retainer. Scope is intentionally ambiguous.",
-        anchor_seller=45_000, anchor_buyer=22_000,
-        batna_seller=25_000, batna_buyer=40_000,
-        zopa=(25_000, 40_000), currency="USD", unit="monthly retainer",
-        difficulty=1,
-        drift_events=[
-            DriftEvent(trigger_turn=6, event="Scope expanded mid-discussion",
-                       effect_on_urgency=0.2, effect_on_has_alternative=False),
-        ],
-    ),
-    Scenario(
+    "hiring_package": Scenario(
         id="hiring_package",
         title="Senior Engineer Offer",
         description="Total comp negotiation: base + equity + signing bonus.",
@@ -70,20 +57,7 @@ SCENARIOS: list[Scenario] = [
                        effect_on_urgency=-0.25, effect_on_has_alternative=True),
         ],
     ),
-    Scenario(
-        id="vendor_hardware",
-        title="Hardware Vendor Contract",
-        description="200 server units bulk purchase. Volume discounts + warranty.",
-        anchor_seller=2_400_000, anchor_buyer=1_600_000,
-        batna_seller=1_750_000, batna_buyer=2_200_000,
-        zopa=(1_750_000, 2_200_000), currency="USD", unit="total contract value",
-        difficulty=3,
-        drift_events=[
-            DriftEvent(trigger_turn=10, event="Supply chain delay announced",
-                       effect_on_urgency=0.35, effect_on_has_alternative=False),
-        ],
-    ),
-    Scenario(
+    "acquisition_term_sheet": Scenario(
         id="acquisition_term_sheet",
         title="Startup Acquisition",
         description="Acqui-hire: valuation, retention packages, earnout structure.",
@@ -98,15 +72,13 @@ SCENARIOS: list[Scenario] = [
                        effect_on_urgency=-0.4, effect_on_has_alternative=True),
         ],
     ),
-]
-
-_SCENARIO_MAP: dict[str, Scenario] = {s.id: s for s in SCENARIOS}
+}
 
 
 def get_scenario(scenario_id: str) -> Scenario:
     """Get a scenario by ID. Raises InvalidScenarioError if not found."""
-    if scenario_id not in _SCENARIO_MAP:
+    if scenario_id not in SCENARIOS:
         raise InvalidScenarioError(
-            f"Unknown scenario: {scenario_id!r}. Valid: {list(_SCENARIO_MAP)}"
+            f"Unknown scenario: {scenario_id!r}. Valid: {list(SCENARIOS)}"
         )
-    return _SCENARIO_MAP[scenario_id]
+    return SCENARIOS[scenario_id]

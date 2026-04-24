@@ -41,7 +41,7 @@ class TestToMTracker:
             "Expected alternative to be detected from utterance"
 
     def test_confidence_increases_over_turns(self):
-        tracker = ToMTracker(_initial_belief(), PersonaType.ANALYST)
+        tracker = ToMTracker(_initial_belief(), PersonaType.SHARK)
         first_confidence = tracker.current_belief.confidence
         tracker.update(140_000, None, "Let's review the data.", 1)
         tracker.update(138_000, None, "What metrics support this?", 2)
@@ -49,7 +49,7 @@ class TestToMTracker:
             f"Expected confidence to grow: {first_confidence} -> {tracker.current_belief.confidence}"
 
     def test_drift_event_reduces_confidence(self):
-        tracker = ToMTracker(_initial_belief(), PersonaType.WILDCARD)
+        tracker = ToMTracker(_initial_belief(), PersonaType.SHARK)
         pre_confidence = tracker.current_belief.confidence
         tracker.drift_event(effect_on_urgency=0.3, effect_on_has_alternative=True)
         assert tracker.current_belief.confidence < pre_confidence, \

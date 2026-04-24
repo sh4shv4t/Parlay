@@ -5,9 +5,9 @@ All errors return SYNTHETIC_RESPONSE.
 When GOOGLE_API_KEY is absent, MOCK_RESPONSES are returned so the full game
 loop works without any API key.
 
-Model split (cost / quality):
-- MODEL_ID_DEMO: dashboard + MCP — higher-quality Flash for live play.
-- MODEL_ID_DATA: generate_data / runner self-play — cheaper Flash-Lite for bulk.
+Primary model for API calls (dashboard, MCP, data generation, ToM):
+- GEMINI_MODEL — gemini-2.0-flash for bulk/self-play and live callers
+  that pass this id via MODEL_ID_DEMO / MODEL_ID_DATA aliases.
 """
 import asyncio
 import json
@@ -17,15 +17,15 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Live game + API demos (dashboard, MCP)
-MODEL_ID_DEMO = "gemini-2.5-flash"
-# Training data generation (agent.runner, generate_data)
-MODEL_ID_DATA = "gemini-2.5-flash-lite"
-# Backward compatibility: default for imports expecting MODEL_ID
-MODEL_ID = MODEL_ID_DEMO
+GEMINI_MODEL = "gemini-2.0-flash"
+# Aliases for imports (dashboard, MCP, training all use flash-lite)
+MODEL_ID_DEMO = GEMINI_MODEL
+MODEL_ID_DATA = GEMINI_MODEL
+MODEL_ID = GEMINI_MODEL
 
 _client = None
 _mock_warned: bool = False
+_gemini_model_logged: bool = False
 
 # ── Mock responses (keyless dev / CI) ────────────────────────────────────────
 # Offer amounts are realistic for the default SaaS enterprise scenario
@@ -42,30 +42,16 @@ MOCK_RESPONSES: dict[str, list[dict]] = {
     ],
     "diplomat": [
         {"utterance": "I believe we can find something that works for both of us. Let's explore the range.", "offer_amount": 148000, "tactical_move": None},
-        {"utterance": "I appreciate you sharing that. Could we consider packaging some non-price elements?", "offer_amount": 145000, "tactical_move": "sweetener"},
+        {"utterance": "I appreciate your position. If you can move a bit, I can narrow the gap too.", "offer_amount": 145000, "tactical_move": None},
         {"utterance": "We're actually closer than it seems. I'm willing to move if you can meet me halfway.", "offer_amount": 142000, "tactical_move": None},
-        {"utterance": "Here's a revised proposal that I think reflects your concerns.", "offer_amount": 140000, "tactical_move": "reframe"},
+        {"utterance": "Here's a revised proposal that I think reflects your concerns.", "offer_amount": 140000, "tactical_move": None},
         {"utterance": "I think we've built enough trust here. Let me share something that might help us close.", "offer_amount": 138000, "tactical_move": None},
-    ],
-    "analyst": [
-        {"utterance": "I've modeled this extensively. The numbers you're presenting don't align with market benchmarks.", "offer_amount": 140000, "tactical_move": None},
-        {"utterance": "Can you provide the data backing that position? Meanwhile, here's a fact-based counter.", "offer_amount": 138000, "tactical_move": None},
-        {"utterance": "Based on comparable transactions, the fair value range is well-established.", "offer_amount": 136000, "tactical_move": "reframe"},
-        {"utterance": "The variance in your offer exceeds two standard deviations from the median. Here is mine.", "offer_amount": 135000, "tactical_move": None},
-        {"utterance": "I've run the numbers three ways. Here is the only figure that makes sense.", "offer_amount": 133000, "tactical_move": "anchor_high"},
-    ],
-    "wildcard": [
-        {"utterance": "You know what? Let's just see where this goes. I feel good about today.", "offer_amount": 155000, "tactical_move": None},
-        {"utterance": "Honestly I wasn't expecting that. You know what — here's a thought.", "offer_amount": 143000, "tactical_move": None},
-        {"utterance": "Something you said changed my thinking entirely. I'm going a different direction.", "offer_amount": 160000, "tactical_move": "reframe"},
-        {"utterance": "This is either a great deal or a terrible one. I genuinely can't tell. Let's find out.", "offer_amount": 137000, "tactical_move": None},
-        {"utterance": "Sure, why not. But I want something extra thrown in — and I'm here at this price.", "offer_amount": 148000, "tactical_move": "sweetener"},
     ],
     "veteran": [
         {"utterance": "I've been in this room many times. I know what fair looks like and that isn't it.", "offer_amount": 155000, "tactical_move": None},
         {"utterance": "…I'll give you a moment to reconsider that position.", "offer_amount": 152000, "tactical_move": "silence"},
         {"utterance": "I've seen every tactic in the book. Let's cut to what we're both actually thinking.", "offer_amount": 149000, "tactical_move": None},
-        {"utterance": "Experience tells me we're about three moves from a deal.", "offer_amount": 146000, "tactical_move": "reframe"},
+        {"utterance": "Experience tells me we're about three moves from a deal.", "offer_amount": 146000, "tactical_move": None},
         {"utterance": "You're good. But I've been doing this longer. Here's my considered response.", "offer_amount": 144000, "tactical_move": None},
     ],
 }
@@ -89,7 +75,7 @@ def _get_mock_response(persona: str, turn: int) -> dict:
     Return a canned response for keyless dev.
 
     Args:
-        persona: Persona key (shark / diplomat / analyst / wildcard / veteran).
+        persona: Persona key (shark / diplomat / veteran).
         turn:    Current turn count — used to cycle through the 5 canned lines.
 
     Returns:
@@ -156,7 +142,7 @@ async def call_gemini(
         messages:      List of {"role": "user"|"model", "parts": ["..."]} dicts.
         max_tokens:    Maximum output tokens for the response.
         persona:       Persona name used for mock-mode selection.
-        model:         Model id, or None for MODEL_ID_DATA (runner / data gen).
+        model:         Model id, or None for GEMINI_MODEL (runner / data gen).
 
     Returns:
         Parsed dict with keys: utterance (str), offer_amount (float|None),
@@ -164,6 +150,11 @@ async def call_gemini(
     """
     if _is_mock_mode():
         return _get_mock_response(persona, len(messages))
+
+    global _gemini_model_logged
+    if not _gemini_model_logged:
+        logger.info(f"[Gemini] Using model: {GEMINI_MODEL}")
+        _gemini_model_logged = True
 
     mid = model if model is not None else MODEL_ID_DATA
     text = ""
@@ -260,7 +251,7 @@ async def call_gemini_tom(
 
         def _call():
             chat = _get_client().chats.create(
-                model=MODEL_ID_DATA,
+                model=GEMINI_MODEL,
                 history=_legacy_messages_to_history(conversation_history),
             )
             return chat.send_message(

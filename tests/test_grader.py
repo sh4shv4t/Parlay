@@ -1,22 +1,28 @@
 """Tests for parlay_env/grader.py."""
-import pytest
-from parlay_env.models import (
-    ParlayState, ParlayAction, BeliefState, HiddenState,
-    PersonaType, TacticalMove,
-)
+from dashboard.api import _apply_zopa_erosion
 from parlay_env.grader import (
-    compute_step_reward, compute_terminal_reward, grade_episode, EpisodeGrade
+    EpisodeGrade,
+    compute_step_reward,
+    compute_terminal_reward,
+    detect_bluff_challenge,
+    grade_episode,
 )
-from parlay_env.reward import GAMMA, OMEGA, ETA
+from parlay_env.models import BeliefState, HiddenState, ParlayAction, ParlayState, PersonaType
+from parlay_env.reward import OMEGA, PSI
 
 
-def _make_hidden(budget: float = 165_000, walk: float = 125_000) -> HiddenState:
+def _make_hidden(
+    budget: float = 165_000,
+    walk: float = 125_000,
+    last_stated_batna: float | None = None,
+) -> HiddenState:
     return HiddenState(
         budget_ceiling=budget,
         walk_away_price=walk,
         urgency_score=0.5,
         has_alternative=False,
         persona_drifted=False,
+        last_stated_batna=last_stated_batna,
     )
 
 
@@ -35,21 +41,22 @@ def _make_state(
     cumulative: float = 0.0,
     offers: list[float] | None = None,
     beliefs: list[BeliefState] | None = None,
+    hidden: HiddenState | None = None,
 ) -> ParlayState:
-    hidden = _make_hidden()
+    actual_hidden = hidden or _make_hidden()
     return ParlayState(
         session_id="test-session",
         scenario_id="saas_enterprise",
         persona=PersonaType.SHARK,
-        act=1,
         step_count=step,
         cumulative_reward=cumulative,
-        hidden_state=hidden,
+        hidden_state=actual_hidden,
         belief_history=beliefs or [_make_belief()],
         offer_history=offers or [],
         drift_events_fired=0,
         episode_done=False,
         credibility_points=100,
+        original_zopa_width=actual_hidden.budget_ceiling - actual_hidden.walk_away_price,
     )
 
 
@@ -61,28 +68,32 @@ class TestComputeStepReward:
         result = compute_step_reward(state, action, next_state)
         assert isinstance(result, float), f"Expected float, got {type(result)}"
 
-    def test_no_offer_returns_tom_bonus_only(self):
-        state = _make_state()
-        action = ParlayAction(utterance="I'll need more time.")
-        next_state = _make_state(step=1)
-        result = compute_step_reward(state, action, next_state)
-        assert result > -50.0, f"Expected > -50, got {result}"
-
     def test_noise_penalty_applied(self):
-        """Random/ungrounded utterance should get a noise penalty."""
         state = _make_state(offers=[140_000.0])
         action = ParlayAction(utterance="xyz", offer_amount=140_000.0)
-        next_state = _make_state(step=1, offers=[140_000.0])
+        next_state = _make_state(step=1, offers=[140_000.0, 140_000.0])
         result = compute_step_reward(state, action, next_state)
-        assert isinstance(result, float)
+        assert isinstance(result, float), f"Expected float, got {type(result)}"
 
-    def test_concession_penalty(self):
-        """Lowering your offer should incur a concession penalty."""
-        state = _make_state(offers=[150_000.0])
-        action = ParlayAction(utterance="Fine, I'll go to 140000.", offer_amount=140_000.0)
-        next_state = _make_state(step=1, offers=[150_000.0, 140_000.0])
-        result = compute_step_reward(state, action, next_state)
-        assert isinstance(result, float)
+    def test_bluff_detection_awards_psi(self):
+        hidden = _make_hidden(last_stated_batna=198_000.0)
+        state = _make_state(hidden=hidden)
+        next_state = _make_state(step=1, hidden=hidden)
+        action = ParlayAction(
+            utterance="I don't believe that's your walk-away.",
+            offer_amount=None,
+            tactical_move=None,
+        )
+
+        caught = detect_bluff_challenge(
+            utterance=action.utterance,
+            opponent_stated_batna=198_000.0,
+            opponent_true_batna=165_000.0,
+        )
+        reward = compute_step_reward(state, action, next_state)
+
+        assert caught is True, f"Expected True, got {caught}"
+        assert reward >= PSI, f"Expected at least PSI={PSI}, got {reward}"
 
 
 class TestComputeTerminalReward:
@@ -96,22 +107,11 @@ class TestComputeTerminalReward:
         result = compute_terminal_reward(state, final_price=120_000.0, t_close=10)
         assert result == -OMEGA, f"Expected -{OMEGA}, got {result}"
 
-    def test_no_deal_partial_reward(self):
-        state = _make_state()
-        result = compute_terminal_reward(state, final_price=None)
-        assert isinstance(result, float), f"Expected float, got {type(result)}"
-
     def test_speed_bonus_for_early_close(self):
         state = _make_state()
         fast = compute_terminal_reward(state, final_price=145_000.0, t_close=5, t_max=20)
         slow = compute_terminal_reward(state, final_price=145_000.0, t_close=18, t_max=20)
         assert fast > slow, f"Expected fast close > slow close: {fast} vs {slow}"
-
-    def test_drift_adaptation_bonus(self):
-        state = _make_state()
-        with_drift = compute_terminal_reward(state, final_price=145_000.0, t_close=10, drift_adapted=True)
-        without_drift = compute_terminal_reward(state, final_price=145_000.0, t_close=10, drift_adapted=False)
-        assert with_drift > without_drift, f"Expected drift bonus: {with_drift} vs {without_drift}"
 
 
 class TestGradeEpisode:
@@ -123,7 +123,7 @@ class TestGradeEpisode:
     def test_deal_efficiency_in_range(self):
         state = _make_state(step=10, offers=[145_000.0])
         grade = grade_episode(state, final_price=145_000.0, t_close=10)
-        assert 0.0 <= grade.deal_efficiency <= 1.0, f"Efficiency out of range: {grade.deal_efficiency}"
+        assert 0.0 <= grade.deal_efficiency <= 1.0, f"Expected [0,1], got {grade.deal_efficiency}"
 
     def test_no_deal_zero_efficiency(self):
         state = _make_state(step=20)
@@ -134,3 +134,21 @@ class TestGradeEpisode:
         state = _make_state(step=10, offers=[145_000.0])
         grade = grade_episode(state, final_price=145_000.0, bluffs_caught=3)
         assert grade.bluffs_caught == 3, f"Expected 3, got {grade.bluffs_caught}"
+
+    def test_zopa_collapse_walk_away(self):
+        hidden = _make_hidden(budget=103.0, walk=100.0)
+        state = _make_state(hidden=hidden)
+
+        for _ in range(3):
+            state.tension_score = 80.0
+            state.high_tension_streak = 2
+            _apply_zopa_erosion(state)
+
+        assert state.zopa_erosion_ticks >= 1, f"Expected >=1, got {state.zopa_erosion_ticks}"
+
+        while not state.walk_away and state.zopa_erosion_ticks < 100:
+            state.tension_score = 80.0
+            state.high_tension_streak = 2
+            _apply_zopa_erosion(state)
+
+        assert state.termination_reason == "zopa_collapsed", f"Expected zopa_collapsed, got {state.termination_reason}"

@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Parlay Spectator View</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=EB+Garamond:wght@400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --felt: #1c2b1a;
+      --felt-light: #2a3d28;
+      --mahogany: #2c1810;
+      --mahogany-light: #3d2518;
+      --cream: #f5f0e8;
+      --gold: #c9a84c;
+      --gold-light: #e8c96a;
+      --smoke-light: #b8b0a0;
+      --scarlet: #8b1a1a;
+      --emerald: #1a5c2a;
+      --ink: #1a1208;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--felt);
+      color: var(--cream);
+      font-family: "EB Garamond", serif;
+    }
+    .wrap {
+      width: 1100px;
+      margin: 24px auto;
+      display: grid;
+      grid-template-columns: 550px 500px;
+      gap: 24px;
+      position: relative;
+    }
+    .live-indicator {
+      position: absolute;
+      top: 0;
+      right: 0;
+      font-family: "DM Mono", monospace;
+      color: #ff6b6b;
+      animation: pulse 1s infinite;
+    }
+    .panel {
+      background: var(--mahogany);
+      border: 1px solid rgba(201,168,76,0.3);
+      border-radius: 8px;
+      padding: 16px;
+      min-height: 720px;
+    }
+    h1, h2 {
+      font-family: "Playfair Display", serif;
+      margin: 0 0 10px;
+    }
+    .chat-feed {
+      height: 660px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .bubble {
+      max-width: 85%;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .bubble.player {
+      align-self: flex-end;
+      background: var(--felt-light);
+      border-right: 3px solid var(--gold);
+    }
+    .bubble.opponent {
+      align-self: flex-start;
+      background: var(--cream);
+      color: var(--ink);
+      border-left: 3px solid var(--gold);
+    }
+    .god {
+      background: #14100b;
+      border-color: var(--gold);
+    }
+    .section {
+      border: 1px solid rgba(201,168,76,0.35);
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 14px;
+    }
+    .section h2 {
+      font-size: 1rem;
+      color: var(--gold);
+      margin-bottom: 8px;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 6px 0;
+    }
+    .mono { font-family: "DM Mono", monospace; }
+    .zopa-track, .tension-track {
+      height: 18px;
+      border: 1px solid var(--gold);
+      background: rgba(255,255,255,0.08);
+      border-radius: 999px;
+      overflow: hidden;
+      margin: 8px 0;
+    }
+    .zopa-fill, .tension-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--gold);
+      transition: width 0.3s ease, background 0.3s ease;
+    }
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.6);
+      font-family: "DM Mono", monospace;
+      color: var(--gold);
+      letter-spacing: 0.08em;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+  </style>
+</head>
+<body>
+  <div id="connecting" class="overlay">CONNECTING...</div>
+  <div class="wrap">
+    <div class="live-indicator">● LIVE</div>
+    <section class="panel">
+      <h1 id="title">LIVE NEGOTIATION - SESSION —</h1>
+      <div id="chat-feed" class="chat-feed"></div>
+    </section>
+    <section class="panel god">
+      <div class="section">
+        <h2>HIDDEN STATE</h2>
+        <div class="row"><span>Seller BATNA</span><strong id="seller-batna" class="mono">-</strong></div>
+        <div class="row"><span>Buyer BATNA</span><strong id="buyer-batna" class="mono">-</strong></div>
+        <div class="row"><span>Urgency score</span><strong id="urgency" class="mono">-</strong></div>
+        <div class="row"><span>Bluff active</span><strong id="bluff-active" class="mono">-</strong></div>
+      </div>
+      <div class="section">
+        <h2>DEAL ZONE</h2>
+        <div class="zopa-track"><div id="zopa-fill" class="zopa-fill"></div></div>
+        <div class="row"><span>Erosion ticks</span><strong id="erosion-ticks" class="mono">0</strong></div>
+        <div class="row"><span>Width remaining</span><strong id="width-remaining" class="mono">100%</strong></div>
+      </div>
+      <div class="section">
+        <h2>AGENT PERFORMANCE</h2>
+        <div class="row"><span>ToM Accuracy</span><strong id="tom-accuracy" class="mono">0%</strong></div>
+        <div class="row"><span>Cumulative Reward</span><strong id="cumulative-reward" class="mono">0</strong></div>
+        <div class="row"><span>Bluffs Caught</span><strong id="bluffs-caught" class="mono">0</strong></div>
+      </div>
+      <div class="section">
+        <h2>MARKET EVENT</h2>
+        <div id="market-event">No active market event.</div>
+        <div class="mono" style="margin-top:6px;color:var(--gold-light);">True impact on BATNA: [HIDDEN FROM AGENT]</div>
+        <div id="mev-impact" class="mono" style="margin-top:6px;">-</div>
+      </div>
+      <div class="section">
+        <h2>TENSION METER</h2>
+        <div class="tension-track"><div id="tension-fill" class="tension-fill"></div></div>
+        <div class="row"><span>Tension</span><strong id="tension-value" class="mono">0%</strong></div>
+        <div class="row"><span>Termination</span><strong id="termination" class="mono">-</strong></div>
+      </div>
+    </section>
+  </div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get("session_id") || "";
+    document.getElementById("title").textContent = `LIVE NEGOTIATION - SESSION ${sessionId || "—"}`;
+
+    function money(value) {
+      if (value == null || Number.isNaN(Number(value))) return "-";
+      return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+    }
+
+    function zopaColor(pct) {
+      if (pct > 0.7) return "var(--gold)";
+      if (pct > 0.4) return "#c8860a";
+      return "var(--scarlet)";
+    }
+
+    function updateChat(messages) {
+      const feed = document.getElementById("chat-feed");
+      feed.innerHTML = "";
+      (messages || []).forEach((msg) => {
+        const bubble = document.createElement("div");
+        bubble.className = `bubble ${msg.role === "player" ? "player" : "opponent"}`;
+        bubble.textContent = `${String(msg.role || "").toUpperCase()}: ${msg.text || ""}`;
+        feed.appendChild(bubble);
+      });
+      feed.scrollTop = feed.scrollHeight;
+    }
+
+    function updateView(data) {
+      document.getElementById("seller-batna").textContent = money(data.zopa_lower);
+      document.getElementById("buyer-batna").textContent = money(data.zopa_upper);
+      document.getElementById("urgency").textContent = `${(Number(data.true_urgency || 0)).toFixed(2)} / 1.0`;
+      const bluffActive = data.last_stated_batna != null && Math.abs(Number(data.last_stated_batna) - Number(data.true_walkaway || 0)) > Math.abs(Number(data.true_walkaway || 0)) * 0.15;
+      document.getElementById("bluff-active").textContent = bluffActive ? "YES" : "NO";
+
+      const pct = Number(data.zopa_width_pct || 0);
+      const zopaFill = document.getElementById("zopa-fill");
+      zopaFill.style.width = `${Math.max(0, Math.min(100, pct * 100))}%`;
+      zopaFill.style.background = zopaColor(pct);
+      document.getElementById("erosion-ticks").textContent = String(data.zopa_erosion_ticks || 0);
+      document.getElementById("width-remaining").textContent = `${Math.round(pct * 100)}%`;
+
+      document.getElementById("tom-accuracy").textContent = `${Math.round(Number(data.tom_accuracy || 0) * 100)}%`;
+      document.getElementById("cumulative-reward").textContent = Number(data.cumulative_reward || 0).toFixed(1);
+      document.getElementById("bluffs-caught").textContent = String(data.bluffs_caught || 0);
+
+      document.getElementById("market-event").textContent = data.active_market_event || "No active market event.";
+      document.getElementById("mev-impact").textContent = data.true_mev_impact ? JSON.stringify(data.true_mev_impact) : "-";
+
+      const tension = Math.max(0, Math.min(100, Number(data.tension || 0)));
+      const tensionFill = document.getElementById("tension-fill");
+      tensionFill.style.width = `${tension}%`;
+      tensionFill.style.background = tension > 75 ? "var(--scarlet)" : tension > 45 ? "#c8860a" : "var(--emerald)";
+      document.getElementById("tension-value").textContent = `${Math.round(tension)}%`;
+      document.getElementById("termination").textContent = data.termination_reason || (data.is_terminal ? "terminal" : "live");
+
+      updateChat(data.conversation_tail);
+    }
+
+    if (!sessionId) {
+      document.getElementById("connecting").textContent = "MISSING session_id";
+    } else {
+      const source = new EventSource(`/api/session/${sessionId}/spectate-stream`);
+      source.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        document.getElementById("connecting").style.display = "none";
+        updateView(data);
+        if (data.is_terminal) source.close();
+      };
+      source.onerror = () => {
+        document.getElementById("connecting").textContent = "STREAM ERROR";
+      };
+    }
+  </script>
+</body>
+</html>

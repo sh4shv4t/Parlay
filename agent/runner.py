@@ -94,7 +94,6 @@ async def run_episode(
         session_id=session_id,
         scenario_id=scenario_id,
         persona=persona,
-        act=1,
         step_count=0,
         cumulative_reward=0.0,
         hidden_state=hidden,
@@ -283,13 +282,9 @@ def _parse_tactical_move(value: Optional[str]) -> Optional[TacticalMove]:
 def _get_cp_cost(move: Optional[TacticalMove]) -> int:
     """Return the credibility-point cost for a tactical move."""
     costs: dict[TacticalMove, int] = {
-        TacticalMove.ANCHOR_HIGH:      0,
-        TacticalMove.BATNA_REVEAL:     20,
-        TacticalMove.COALITION_INVITE: 30,
-        TacticalMove.TIME_PRESSURE:    15,
-        TacticalMove.SWEETENER:        10,
-        TacticalMove.SILENCE:          5,
-        TacticalMove.REFRAME:          12,
+        TacticalMove.ANCHOR_HIGH: 0,
+        TacticalMove.BATNA_REVEAL: 20,
+        TacticalMove.SILENCE: 5,
     }
     return costs.get(move, 0) if move else 0
 
