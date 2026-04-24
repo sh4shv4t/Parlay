@@ -6,8 +6,12 @@ import logging
 import os
 import random
 import statistics
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
+
+# Repo root on path when run as `python training/generate_data.py` (script dir is training/)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
 
