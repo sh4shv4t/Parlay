@@ -3,6 +3,7 @@ Theory of Mind belief tracker for Parlay.
 Tracks and updates agent beliefs about opponent hidden state.
 """
 import logging
+import sys
 from typing import Optional
 
 from parlay_env.models import BeliefState, HiddenState, PersonaType, TacticalMove
@@ -44,6 +45,15 @@ class ToMTracker:
     def bluffs_detected(self) -> int:
         """Count of detected bluffs this session."""
         return self._bluffs_detected
+
+    def log_belief_snapshot(self, turn: int) -> None:
+        """Print current belief estimates to stderr (diagnostic; training / live debug)."""
+        b = self.current_belief
+        print(
+            f"[ToM turn={turn}] budget={b.est_budget:.3f}  "
+            f"urgency={b.est_urgency:.3f}  walkaway={b.est_walk_away:.3f}",
+            file=sys.stderr,
+        )
 
     def update(
         self,

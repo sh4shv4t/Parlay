@@ -26,6 +26,8 @@ from agent.personas import PERSONAS, build_system_prompt
 from agent.tom_tracker import ToMTracker
 from game.scenarios import get_scenario
 
+TOM_DIAGNOSTIC = True  # Set False before full training run
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,6 +108,7 @@ async def run_episode(
 
     system_prompt = build_system_prompt(
         persona=persona,
+        scenario_id=scenario_id,
         scenario_title=scenario.title,
         scenario_description=scenario.description,
         batna=hidden.walk_away_price,
@@ -154,7 +157,10 @@ async def run_episode(
 
         # Always pass persona explicitly so mock mode uses the right responses
         agent_response = await call_gemini(
-            system_prompt, agent_messages, persona=persona.value
+            system_prompt,
+            agent_messages,
+            persona=persona.value,
+            scenario_id=scenario_id,
         )
         action = ParlayAction(
             utterance=agent_response.get("utterance", "..."),
@@ -184,6 +190,7 @@ async def run_episode(
             ),
             opponent_messages,
             persona=persona.value,
+            scenario_id=scenario_id,
         )
 
         conversation.append({
@@ -199,6 +206,8 @@ async def run_episode(
             utterance=opponent_response.get("utterance", ""),
             turn=turn,
         )
+        if TOM_DIAGNOSTIC:
+            tom.log_belief_snapshot(turn=turn)
 
         if drift_turn is not None and not drift_adapted and turn <= drift_turn + 2:
             adaptation_signals = ["understand", "noted", "given that", "considering"]

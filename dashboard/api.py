@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from agent.gemini_client import MODEL_ID_DEMO, call_gemini
+from agent.gemini_client import validate_ai_offer_direction
 from agent.personas import PERSONAS, build_system_prompt
 from agent.tom_tracker import ToMTracker
 from game.leaderboard import Leaderboard
@@ -56,8 +57,8 @@ class StartRequest(BaseModel):
 
 class MoveRequest(BaseModel):
     session_id: str
-    amount: float
-    message: str
+    amount: Optional[float] = None
+    message: str = ""
     tactical_move: Optional[str] = None
 
 
@@ -194,6 +195,7 @@ def _build_session(scenario_id: str, persona_str: str, player_name: str) -> tupl
     )
     system_prompt = build_system_prompt(
         persona=persona_type,
+        scenario_id=scenario_id,
         scenario_title=scenario.title,
         scenario_description=scenario.description,
         batna=hidden.walk_away_price,
@@ -351,6 +353,12 @@ async def make_move(req: MoveRequest) -> dict:
     if state.episode_done:
         raise HTTPException(status_code=400, detail="Episode already concluded")
 
+    if req.amount is None and not (req.message or "").strip() and not req.tactical_move:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide a message, a numeric offer, or a tactical move.",
+        )
+
     move: Optional[TacticalMove] = None
     if req.tactical_move:
         try:
@@ -375,19 +383,39 @@ async def make_move(req: MoveRequest) -> dict:
         role = "user" if msg["role"] == "player" else "model"
         gemini_messages.append({"role": role, "parts": [msg["text"]]})
 
-    player_text = f"Player offer: {req.amount:,.0f}. Message: {req.message}"
+    if req.amount is not None:
+        player_text = f"Player offer: {req.amount:,.0f}. Message: {req.message}"
+    else:
+        player_text = f"Player message (no new numeric offer on this turn): {req.message or '(tactical or silence)'}"
     if req.tactical_move:
         player_text += f" [Playing card: {req.tactical_move}]"
     gemini_messages.append({"role": "user", "parts": [player_text]})
+
+    player_offer_for_validation = (
+        req.amount
+        if req.amount is not None
+        else (state.offer_history[-1] if state.offer_history else None)
+    )
 
     opponent_resp = await call_gemini(
         session["system_prompt"],
         gemini_messages,
         persona=state.persona.value,
         model=MODEL_ID_DEMO,
+        scenario_id=state.scenario_id,
     )
     opponent_utterance = opponent_resp.get("utterance", "Let me think about that...")
-    opponent_offer = opponent_resp.get("offer_amount")
+    raw_opp = opponent_resp.get("offer_amount")
+    opponent_offer: Optional[float] = None
+    if raw_opp is not None:
+        try:
+            opponent_offer = float(raw_opp)
+        except (TypeError, ValueError):
+            opponent_offer = None
+    if opponent_offer is not None:
+        opponent_offer = validate_ai_offer_direction(
+            opponent_offer, player_offer_for_validation, state.scenario_id
+        )
     opponent_move: Optional[TacticalMove] = None
     try:
         if opponent_resp.get("tactical_move"):
@@ -420,11 +448,15 @@ async def make_move(req: MoveRequest) -> dict:
         ):
             session["drift_adapted"] = True
 
+    new_history = list(state.offer_history)
+    if req.amount is not None:
+        new_history.append(req.amount)
+
     next_state = ParlayState(
         **{
             **state.model_dump(),
             "step_count": state.step_count + 1,
-            "offer_history": [*state.offer_history, req.amount],
+            "offer_history": new_history,
             "belief_history": list(session["tom_tracker"].history),
             "credibility_points": min(CP_START, state.credibility_points + CP_REGEN - cost),
         }
@@ -432,11 +464,14 @@ async def make_move(req: MoveRequest) -> dict:
     next_state.tension_score = _get_tension(state, move, opponent_move)
     _apply_zopa_erosion(next_state)
 
-    if opponent_offer is not None and abs(req.amount - opponent_offer) / max(req.amount, 1.0) < 0.03:
-        next_state.deal_reached = True
-        next_state.termination_reason = "deal_reached"
+    pe = player_offer_for_validation
+    if opponent_offer is not None and pe is not None:
+        if abs(pe - opponent_offer) / max(abs(pe), 1.0) < 0.03:
+            next_state.deal_reached = True
+            next_state.termination_reason = "deal_reached"
 
-    action = ParlayAction(utterance=req.message, offer_amount=req.amount, tactical_move=move)
+    utterance = req.message or (f"[Tactical: {req.tactical_move}]" if req.tactical_move else "…")
+    action = ParlayAction(utterance=utterance, offer_amount=req.amount, tactical_move=move)
     step_reward = (
         next_state.credibility_points - state.credibility_points
     ) * 0.0  # placeholder to keep local scope explicit
@@ -606,18 +641,27 @@ async def game_step(req: GameStepRequest) -> dict:
         return await accept_deal(AcceptRequest(session_id=req.session_id))
     if req.move == "walk_away":
         return await walk_away(WalkAwayRequest(session_id=req.session_id))
-    if req.offer_amount is None:
-        raise HTTPException(status_code=400, detail="offer_amount required for counter moves")
+
+    has_text = bool((req.message or "").strip())
+    if req.offer_amount is None and not has_text and not req.card_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Send a message, an offer amount, or a tactical card.",
+        )
 
     tactical_move = req.card_id
     if req.move == "anchor":
         tactical_move = TacticalMove.ANCHOR_HIGH.value
 
+    msg = (req.message or "").strip() or (req.move if req.move not in ("counter", "chat") else "")
+    if not msg and tactical_move:
+        msg = f"(tactical: {tactical_move})"
+
     return await make_move(
         MoveRequest(
             session_id=req.session_id,
             amount=req.offer_amount,
-            message=req.message or req.move,
+            message=msg,
             tactical_move=tactical_move,
         )
     )

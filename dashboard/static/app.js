@@ -86,11 +86,16 @@ document.addEventListener("DOMContentLoaded", () => {
     document.body.classList.remove("demo-mode");
   });
 
-  // Offer input enter key
+  // Offer / message input: Enter sends (Shift+Enter could be used for newline in future)
   const offerInput = document.getElementById("offer-input");
-  if (offerInput) offerInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) submitMove();
-  });
+  if (offerInput) {
+    offerInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        submitMove();
+      }
+    });
+  }
 
   // Theme toggle — item 27
   const themeBtn = document.getElementById("theme-toggle");
@@ -375,6 +380,21 @@ function _mockStartData(scenarioId, persona, playerName) {
   };
 }
 
+// Extract first monetary amount from free text (e.g. "I need $220,000 total" → 220000).
+function _parseOptionalOffer(raw) {
+  if (!raw || !String(raw).trim()) return null;
+  const s = String(raw).trim();
+  const withK = /\$?\s*([\d,]+(?:\.\d+)?)\s*([kK])\b/.exec(s);
+  if (withK) {
+    const n = parseFloat(withK[1].replace(/,/g, ""), 10);
+    if (!isNaN(n)) return n * 1000;
+  }
+  const m = s.match(/\$?\s*([\d]{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\b/);
+  if (!m) return null;
+  const n = parseFloat(m[1].replace(/,/g, ""), 10);
+  return isNaN(n) ? null : n;
+}
+
 // ── Submit move ────────────────────────────────────────────────
 async function submitMove() {
   if (gameState.done || !gameState.sessionId) return;
@@ -383,14 +403,13 @@ async function submitMove() {
 
   const raw    = offerInput?.value.trim() ?? "";
   const cardId = gameState.selectedTactic;
-  const offer  = raw ? parseFloat(raw.replace(/[$,]/g, "")) : null;
+  if (!raw && !cardId) return;
 
-  if (offer !== null && isNaN(offer)) return;
+  const offer = _parseOptionalOffer(raw);
 
-  // Build message text
   const msgText = offer != null
     ? `Counter offer: ${formatCurrency(offer, "USD")}.`
-    : raw || "Let me think about that.";
+    : (raw || (cardId ? `(Tactical: ${cardId})` : "Let me think about that."));
 
   if (offer != null) gameState.lastPlayerOffer = offer;
 
@@ -404,10 +423,10 @@ async function submitMove() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         session_id: gameState.sessionId,
-        move: offer ? "counter" : "chat",
+        move: offer != null || cardId ? "counter" : "chat",
         offer_amount: offer,
         card_id: cardId,
-        message: raw,
+        message: raw || (cardId ? `(tactical: ${cardId})` : ""),
       }),
     });
 

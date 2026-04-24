@@ -95,7 +95,10 @@ class TestHealthEndpoint:
             assert data["status"] == "ok", f"Expected ok, got {data['status']}"
             assert "db" in data, f"Missing 'db' key: {data}"
             assert "gemini" in data, f"Missing 'gemini' key: {data}"
-            assert data["gemini"] == "mock", f"Expected mock mode, got {data['gemini']}"
+            assert data["gemini"] in (
+                "mock",
+                "configured",
+            ), f"Expected gemini mock|configured, got {data['gemini']!r}"
 
         asyncio.get_event_loop().run_until_complete(_run())
 

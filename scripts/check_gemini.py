@@ -1,9 +1,9 @@
 """
 One-shot smoke test: verify GOOGLE_API_KEY against the Gemini API.
 
-Default model matches Parlay (`agent/gemini_client.py`: ``gemini-2.0-flash``).
-Some keys (new accounts) get 404 on 2.0 Flash; this script then retries
-``gemini-2.5-flash`` once. Override any time: ``set GEMINI_MODEL=gemini-2.5-flash``.
+Default model matches Parlay (`agent/gemini_client.py`: ``gemini-2.5-flash``).
+If that model is unavailable (404), the script retries once with
+``gemini-1.5-flash``. Override: ``set GEMINI_MODEL=...``.
 
 Usage (from repo root, with venv active):
     python scripts/check_gemini.py
@@ -18,8 +18,8 @@ import sys
 from pathlib import Path
 
 # Keep in sync with agent/gemini_client.MODEL_ID
-_DEFAULT_PARLAY_MODEL = "gemini-2.0-flash"
-_FALLBACK_MODEL = "gemini-2.5-flash"
+_DEFAULT_PARLAY_MODEL = "gemini-2.5-flash"
+_FALLBACK_MODEL = "gemini-2.5-flash-lite"
 
 
 def _load_dotenv() -> None:

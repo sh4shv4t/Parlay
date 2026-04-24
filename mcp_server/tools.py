@@ -18,7 +18,7 @@ from game.scenarios import SCENARIOS, get_scenario
 from game.tactical_cards import TACTICAL_CARDS, draw_hand, get_card
 from game.leaderboard import Leaderboard
 from agent.personas import PERSONAS, build_system_prompt
-from agent.gemini_client import MODEL_ID_DEMO, call_gemini
+from agent.gemini_client import MODEL_ID_DEMO, call_gemini, validate_ai_offer_direction
 from agent.tom_tracker import ToMTracker
 
 logger = logging.getLogger(__name__)
@@ -109,6 +109,7 @@ async def start_negotiation(
 
     system_prompt = build_system_prompt(
         persona=persona_type,
+        scenario_id=scenario_id,
         scenario_title=scenario.title,
         scenario_description=scenario.description,
         batna=hidden.walk_away_price,
@@ -248,9 +249,20 @@ async def make_offer(
         sess["system_prompt"],
         gemini_messages,
         model=MODEL_ID_DEMO,
+        scenario_id=sess["scenario_id"],
     )
     opponent_utterance: str = opponent_resp.get("utterance", "I'll need to consider that.")
-    opponent_offer: Optional[float] = opponent_resp.get("offer_amount")
+    raw_opp = opponent_resp.get("offer_amount")
+    opponent_offer: Optional[float] = None
+    if raw_opp is not None:
+        try:
+            opponent_offer = float(raw_opp)
+        except (TypeError, ValueError):
+            opponent_offer = None
+    if opponent_offer is not None:
+        opponent_offer = validate_ai_offer_direction(
+            opponent_offer, float(amount), sess["scenario_id"]
+        )
     opponent_move: Optional[str] = opponent_resp.get("tactical_move")
 
     sess["conversation"].append({

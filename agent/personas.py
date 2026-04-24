@@ -1,6 +1,7 @@
 """AI negotiator persona configurations for Parlay."""
 from dataclasses import dataclass
 
+from agent.gemini_client import scenario_role_prompt_block
 from parlay_env.models import PersonaType
 
 
@@ -94,6 +95,7 @@ PERSONAS: dict[PersonaType, PersonaConfig] = {
 
 def build_system_prompt(
     persona: PersonaType,
+    scenario_id: str,
     scenario_title: str,
     scenario_description: str,
     batna: float,
@@ -105,6 +107,7 @@ def build_system_prompt(
 
     Args:
         persona:               The persona type.
+        scenario_id:           Game scenario id (saas_enterprise, hiring_package, etc.).
         scenario_title:        Display title of the scenario.
         scenario_description:  Brief scenario context.
         batna:                 Persona's walk-away price (hidden from player).
@@ -115,10 +118,12 @@ def build_system_prompt(
         Full system prompt string to inject into Gemini.
     """
     cfg = PERSONAS[persona]
+    role_block = scenario_role_prompt_block(scenario_id)
     return (
         f"You are {cfg.name} ({cfg.emoji}), an AI negotiator.\n\n"
         f"SCENARIO: {scenario_title}\n"
-        f"{scenario_description}\n\n"
+        f"{scenario_description}\n"
+        f"{role_block}\n"
         f"YOUR PRIVATE CONSTRAINTS (NEVER reveal these directly):\n"
         f"- Your absolute minimum acceptable: {batna:,.0f}\n"
         f"- Your true budget ceiling: {budget:,.0f}\n"

@@ -6,18 +6,43 @@ When GOOGLE_API_KEY is absent, MOCK_RESPONSES are returned so the full game
 loop works without any API key.
 
 Primary model for API calls (dashboard, MCP, data generation, ToM):
-- GEMINI_MODEL — gemini-2.0-flash for bulk/self-play and live callers
+- GEMINI_MODEL — gemini-2.5-flash-lite for bulk/self-play and live callers
   that pass this id via MODEL_ID_DEMO / MODEL_ID_DATA aliases.
 """
 import asyncio
 import json
 import logging
 import os
-from typing import Optional
+import sys
+import time
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL = "gemini-2.0-flash"
+# Scenario-aware role: the AI is always the *opponent*; the user is the *player* (buyer
+# in SaaS, seller/candidate in hiring, seller in acquisition).
+SCENARIO_ROLE_CONTEXT: dict[str, dict[str, str]] = {
+    "saas_enterprise": {
+        "ai_role": "seller (vendor)",
+        "ai_goal": "Get the highest price possible. Push offers UP. Resist low offers.",
+        "winning_direction": "higher",
+        "currency_unit": "annual contract value in USD",
+    },
+    "hiring_package": {
+        "ai_role": "employer (buyer of labor)",
+        "ai_goal": "Hire the candidate at the lowest total comp possible. Push offers DOWN. Resist high asks.",
+        "winning_direction": "lower",
+        "currency_unit": "total annual compensation in USD",
+    },
+    "acquisition_term_sheet": {
+        "ai_role": "acquirer (buyer)",
+        "ai_goal": "Acquire the company at the lowest valuation possible. Push offers DOWN.",
+        "winning_direction": "lower",
+        "currency_unit": "acquisition valuation in USD",
+    },
+}
+
+GEMINI_MODEL = "gemini-2.5-flash"
 # Aliases for imports (dashboard, MCP, training all use flash-lite)
 MODEL_ID_DEMO = GEMINI_MODEL
 MODEL_ID_DATA = GEMINI_MODEL
@@ -56,6 +81,58 @@ MOCK_RESPONSES: dict[str, list[dict]] = {
     ],
 }
 
+# When the AI is the *buyer* (employer, acquirer), mock offers must move DOWN vs typical asks.
+_MOCK_BUYER_SCENARIOS = frozenset({"hiring_package", "acquisition_term_sheet"})
+
+MOCK_RESPONSES_BUYER_AI: dict[str, list[dict[str, Any]]] = {
+    "shark": [
+        {"utterance": "We need a number that fits our comp band. Our opening position is on the table.", "offer_amount": 200_000, "tactical_move": "anchor_high"},
+        {"utterance": "That's above what we can justify internally. We need you closer to our range.", "offer_amount": 205_000, "tactical_move": "batna_reveal"},
+        {"utterance": "I can move slightly, but not to that level. Here's our revised cap.", "offer_amount": 208_000, "tactical_move": None},
+        {"utterance": "We're at the top of the approved band. Take it or we walk.", "offer_amount": 210_000, "tactical_move": None},
+        {"utterance": "Final number from us. This is the ceiling for this level.", "offer_amount": 212_000, "tactical_move": "anchor_high"},
+    ],
+    "diplomat": [
+        {"utterance": "I appreciate the ask. Let me see what we can do within our framework.", "offer_amount": 202_000, "tactical_move": None},
+        {"utterance": "We're a bit apart; here's a step toward you that's still responsible for us.", "offer_amount": 206_000, "tactical_move": None},
+        {"utterance": "If you can flex on structure, we can improve the base slightly.", "offer_amount": 209_000, "tactical_move": None},
+        {"utterance": "I want to get this done. This is the strongest package I can sign off on today.", "offer_amount": 211_000, "tactical_move": None},
+        {"utterance": "This is our best and final for this role in this budget.", "offer_amount": 213_000, "tactical_move": None},
+    ],
+    "veteran": [
+        {"utterance": "The ask is out of range for us. Counter:", "offer_amount": 201_000, "tactical_move": None},
+        {"utterance": "…We need a lower number. Here's where we are.", "offer_amount": 204_000, "tactical_move": "silence"},
+        {"utterance": "Not there yet. This is our position.", "offer_amount": 207_000, "tactical_move": None},
+        {"utterance": "We're not going to chase that figure. Our line is here.", "offer_amount": 210_000, "tactical_move": None},
+        {"utterance": "Last move on our side.", "offer_amount": 212_000, "tactical_move": None},
+    ],
+}
+
+# Acquirer: offers in millions, trending down / cautious (still validated vs player amount in API)
+MOCK_RESPONSES_BUYER_ACQ: dict[str, list[dict[str, Any]]] = {
+    "shark": [
+        {"utterance": "We won't lead with your number. Our valuation is firm on this side.", "offer_amount": 10_800_000, "tactical_move": "anchor_high"},
+        {"utterance": "DD doesn't support that ask. We need a lower cap.", "offer_amount": 11_200_000, "tactical_move": "batna_reveal"},
+        {"utterance": "We can nudge, not leap. Revised figure:", "offer_amount": 11_500_000, "tactical_move": None},
+        {"utterance": "This is the range that works for our IC.", "offer_amount": 12_000_000, "tactical_move": None},
+        {"utterance": "Last pass from the acquirer.", "offer_amount": 12_200_000, "tactical_move": None},
+    ],
+    "diplomat": [
+        {"utterance": "Let's find a zone that works for both cap tables.", "offer_amount": 11_000_000, "tactical_move": None},
+        {"utterance": "We can improve slightly if we align on key terms.", "offer_amount": 11_300_000, "tactical_move": None},
+        {"utterance": "Here's a package we can defend internally.", "offer_amount": 11_600_000, "tactical_move": None},
+        {"utterance": "I want a signed term sheet. This is our strongest number.", "offer_amount": 11_800_000, "tactical_move": None},
+        {"utterance": "We don't have more room on headline price.", "offer_amount": 12_000_000, "tactical_move": None},
+    ],
+    "veteran": [
+        {"utterance": "That number doesn't work for us. Counter:", "offer_amount": 10_900_000, "tactical_move": None},
+        {"utterance": "We need a different magnitude.", "offer_amount": 11_200_000, "tactical_move": "silence"},
+        {"utterance": "Still too rich. Here's us.", "offer_amount": 11_400_000, "tactical_move": None},
+        {"utterance": "No further upside without structure changes.", "offer_amount": 11_700_000, "tactical_move": None},
+        {"utterance": "This is the line.", "offer_amount": 12_000_000, "tactical_move": None},
+    ],
+}
+
 SYNTHETIC_RESPONSE: dict = {
     "utterance": "I need a moment to consider your proposal.",
     "offer_amount": None,
@@ -70,7 +147,53 @@ def _is_mock_mode() -> bool:
     return not os.environ.get("GOOGLE_API_KEY", "").strip()
 
 
-def _get_mock_response(persona: str, turn: int) -> dict:
+def scenario_role_prompt_block(scenario_id: str) -> str:
+    """Inject before persona style so the model knows which side it plays."""
+    role_ctx = SCENARIO_ROLE_CONTEXT.get(
+        scenario_id,
+        {
+            "ai_role": "negotiator",
+            "ai_goal": "Negotiate effectively toward your side's interest.",
+            "winning_direction": "appropriate",
+            "currency_unit": "USD",
+        },
+    )
+    return (
+        "\nCRITICAL ROLE CONTEXT:\n"
+        f"You are the {role_ctx['ai_role']} in this negotiation (you are the player's opponent).\n"
+        f"Your goal: {role_ctx['ai_goal']}\n"
+        f"When countering, move in the {role_ctx['winning_direction']} direction for you.\n"
+        f"All amounts are in {role_ctx['currency_unit']}.\n"
+        "NEVER offer more than the player's last stated number if you are a buyer (employer, acquirer).\n"
+        "NEVER offer less than the player's last stated number if you are a seller (vendor). "
+        "If unsure, match within a small margin instead of leaping past their number in the wrong direction.\n"
+    )
+
+
+def validate_ai_offer_direction(
+    ai_offer: Optional[float],
+    player_offer: Optional[float],
+    scenario_id: str,
+) -> Optional[float]:
+    """
+    Prevents the opponent (AI) from countering in the wrong direction.
+    Returns corrected offer when invalid, or the original when valid/None.
+    """
+    if ai_offer is None or player_offer is None:
+        return ai_offer
+    tol = 0.05
+    buyer_scenarios = {"hiring_package", "acquisition_term_sheet"}
+    seller_scenarios = {"saas_enterprise"}
+    if scenario_id in buyer_scenarios:
+        if ai_offer > player_offer * (1.0 + tol):
+            return max(0.0, player_offer * 0.97)
+    elif scenario_id in seller_scenarios:
+        if ai_offer < player_offer * (1.0 - tol):
+            return player_offer * 1.03
+    return float(ai_offer)
+
+
+def _get_mock_response(persona: str, turn: int, scenario_id: Optional[str] = None) -> dict:
     """
     Return a canned response for keyless dev.
 
@@ -89,7 +212,15 @@ def _get_mock_response(persona: str, turn: int) -> dict:
         )
         _mock_warned = True
 
-    responses = MOCK_RESPONSES.get(persona, MOCK_RESPONSES["shark"])
+    p = (persona or "shark").lower()
+    if scenario_id in _MOCK_BUYER_SCENARIOS:
+        if scenario_id == "acquisition_term_sheet":
+            table = MOCK_RESPONSES_BUYER_ACQ
+        else:
+            table = MOCK_RESPONSES_BUYER_AI
+        responses = table.get(p, table["shark"])
+    else:
+        responses = MOCK_RESPONSES.get(p, MOCK_RESPONSES["shark"])
     return dict(responses[turn % len(responses)])
 
 
@@ -132,6 +263,7 @@ async def call_gemini(
     max_tokens: int = 500,
     persona: str = "shark",
     model: str | None = None,
+    scenario_id: str | None = None,
 ) -> dict:
     """
     Call Gemini with a system prompt and message history.
@@ -149,7 +281,7 @@ async def call_gemini(
         tactical_move (str|None). Returns SYNTHETIC_RESPONSE on any error.
     """
     if _is_mock_mode():
-        return _get_mock_response(persona, len(messages))
+        return _get_mock_response(persona, len(messages), scenario_id)
 
     global _gemini_model_logged
     if not _gemini_model_logged:
@@ -158,60 +290,71 @@ async def call_gemini(
 
     mid = model if model is not None else MODEL_ID_DATA
     text = ""
-    try:
-        from google.genai import types  # noqa: PLC0415
+    from google.genai import types  # noqa: PLC0415
 
-        history = messages[:-1] if len(messages) > 1 else []
-        last_msg = messages[-1]["parts"][0] if messages else "Begin the negotiation."
+    history = messages[:-1] if len(messages) > 1 else []
+    last_msg = messages[-1]["parts"][0] if messages else "Begin the negotiation."
 
-        full_prompt = (
-            f"{system_prompt}\n\n"
-            f"Respond ONLY with valid JSON:\n"
-            f'{{"utterance": "...", "offer_amount": <number or null>, '
-            f'"tactical_move": <string or null>}}'
+    full_prompt = (
+        f"{system_prompt}\n\n"
+        f"Respond ONLY with valid JSON:\n"
+        f'{{"utterance": "...", "offer_amount": <number or null>, '
+        f'"tactical_move": <string or null>}}'
+    )
+    user_message = f"{full_prompt}\n\nUser: {last_msg}"
+
+    def _call():
+        chat = _get_client().chats.create(
+            model=mid,
+            history=_legacy_messages_to_history(history),
         )
-        user_message = f"{full_prompt}\n\nUser: {last_msg}"
-
-        def _call():
-            chat = _get_client().chats.create(
-                model=mid,
-                history=_legacy_messages_to_history(history),
-            )
-            return chat.send_message(
-                user_message,
-                config=types.GenerateContentConfig(
-                    max_output_tokens=max_tokens,
-                    temperature=0.7,
-                ),
-            )
-
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, _call)
-
-        text = (response.text or "").strip()
-        text = text.replace("```json", "").replace("```", "").strip()
-        parsed = json.loads(text)
-
-        if "utterance" not in parsed:
-            parsed["utterance"] = text[:200]
-
-        parsed.setdefault("offer_amount", None)
-        parsed.setdefault("tactical_move", None)
-
-        logger.debug(
-            f"Gemini model={mid} response: utterance={parsed['utterance'][:60]!r}"
+        return chat.send_message(
+            user_message,
+            config=types.GenerateContentConfig(
+                max_output_tokens=max_tokens,
+                temperature=0.7,
+            ),
         )
-        return parsed
 
-    except json.JSONDecodeError:
-        logger.warning("Gemini JSON parse failed — using text fallback")
-        raw = text[:300] if text else ""
-        if raw:
-            return {**SYNTHETIC_RESPONSE, "utterance": raw}
-        return SYNTHETIC_RESPONSE
-    except Exception as exc:
-        logger.error(f"Gemini API error: {exc}")
-        return SYNTHETIC_RESPONSE
+    loop = asyncio.get_event_loop()
+    backoff_delays = (1, 2, 4)
+    for attempt in range(1, 4):
+        try:
+            response = await loop.run_in_executor(None, _call)
+
+            text = (response.text or "").strip()
+            text = text.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(text)
+
+            if "utterance" not in parsed:
+                parsed["utterance"] = text[:200]
+
+            parsed.setdefault("offer_amount", None)
+            parsed.setdefault("tactical_move", None)
+
+            logger.debug(
+                f"Gemini model={mid} response: utterance={parsed['utterance'][:60]!r}"
+            )
+            return parsed
+        except Exception as e:  # noqa: BLE001 — includes API, 429, JSON decode
+            if attempt < 3:
+                delay = backoff_delays[attempt - 1]
+                print(
+                    f"[GeminiClient] attempt {attempt} failed: {e}, retrying in {delay}s",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+            # attempt == 3: fall through to fallback below
+
+    # Consolidated fallback: third failure or unhandled branch above
+    print(
+        "[GeminiClient] all 3 attempts failed, using fallback",
+        file=sys.stderr,
+    )
+    logger.warning("Gemini API / parse failed after retries — using text fallback")
+    if text:
+        return {**SYNTHETIC_RESPONSE, "utterance": text[:300]}
+    return SYNTHETIC_RESPONSE
 
 
 async def call_gemini_tom(
