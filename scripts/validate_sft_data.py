@@ -115,7 +115,7 @@ def main() -> None:
         if prompt_tok and statistics.mean(prompt_tok) > 2048.0:
             print(
                 "  FLAG: Mean prompt length > 2048 (approx. tokens) - may OOM or truncate with "
-                "SFTConfig max_seq_length=2048 in sft_train.py on small GPUs."
+                "SFTConfig max_length=2048 in sft_train.py on small GPUs."
             )
 
     print()

@@ -134,7 +134,7 @@ def train_sft(
         save_strategy="epoch",
         fp16=True,
         report_to="none",
-        max_seq_length=2048,
+        max_length=2048,
     )
 
     if not torch.cuda.is_available():
