@@ -11,6 +11,7 @@ Usage:
         --steps 500
 """
 import argparse
+import inspect
 import json
 import logging
 import os
@@ -101,8 +102,9 @@ def _get_zopa_width(scenario_id: str) -> float:
 
 def _per_device_and_accum_for_grpo_g(num_g: int) -> tuple[int, int]:
     """
-    TRL GRPO: generation_batch_size (defaults to per_device * grad_accum on 1 GPU) must
-    be divisible by num_generations. Pick a reasonable (per_device, accum) pair.
+    TRL (GRPOConfig): generation_batch_size = per_device * world_size * steps_per_generation,
+    with steps_per_generation defaulting to gradient_accumulation_steps. On 1 GPU, that is
+    per_device * gradient_accumulation_steps — must be divisible by num_generations.
     """
     g = max(1, int(num_g))
     for pd, acc in (
@@ -131,6 +133,8 @@ def train_grpo(
     output_dir: str,
     steps: int = 500,
     min_reward: float = -50.0,
+    *,
+    num_generations: int | None = None,
 ) -> None:
     """
     GRPO training loop.
@@ -157,9 +161,11 @@ def train_grpo(
 
     try:
         from peft import LoraConfig
-        from trl import GRPOTrainer, GRPOConfig
+        from trl import GRPOConfig, GRPOTrainer
     except ImportError as exc:
         raise ImportError("Install: pip install trl peft") from exc
+
+    g = int(num_generations) if num_generations is not None else int(GRPO_GENERATIONS)
 
     from .reward_fn import (
         negotiation_efficiency_reward,
@@ -181,33 +187,39 @@ def train_grpo(
         task_type="CAUSAL_LM",
     )
 
-    per_dev, grad_acc = _per_device_and_accum_for_grpo_g(GRPO_GENERATIONS)
+    per_dev, grad_acc = _per_device_and_accum_for_grpo_g(g)
+    # 1-GPU: TRL default gen batch = per_device * steps_per_gen; steps_per_gen defaults to grad_acc
+    gen_batch = per_dev * grad_acc
     logger.info(
-        "GRPO batch: per_device_train_batch_size=%d gradient_accumulation_steps=%d (product=%d, G=%d)",
+        "GRPO batch: per_device=%d grad_accum=%d → generation_batch_size=%d, G=%d",
         per_dev,
         grad_acc,
-        per_dev * grad_acc,
-        GRPO_GENERATIONS,
+        gen_batch,
+        g,
     )
 
-    training_args = GRPOConfig(
-        output_dir=output_dir,
-        num_train_epochs=1,
-        per_device_train_batch_size=per_dev,
-        gradient_accumulation_steps=grad_acc,
-        learning_rate=5e-7,
-        num_generations=GRPO_GENERATIONS,
-        max_completion_length=256,
-        beta=0.001,
-        epsilon=0.2,
-        scale_rewards="batch",
-        logging_steps=5,
-        save_steps=50,
-        push_to_hub=False,
-        bf16=torch.cuda.is_available(),
-        report_to="none",
-        max_steps=steps,
-    )
+    grpo_kw: dict = {
+        "output_dir": output_dir,
+        "num_train_epochs": 1,
+        "per_device_train_batch_size": per_dev,
+        "gradient_accumulation_steps": grad_acc,
+        "learning_rate": 5e-7,
+        "num_generations": g,
+        "max_completion_length": 256,
+        "beta": 0.001,
+        "epsilon": 0.2,
+        "scale_rewards": "batch",
+        "logging_steps": 5,
+        "save_steps": 50,
+        "push_to_hub": False,
+        "bf16": torch.cuda.is_available(),
+        "report_to": "none",
+        "max_steps": steps,
+    }
+    if "generation_batch_size" in set(inspect.signature(GRPOConfig.__init__).parameters):
+        grpo_kw["generation_batch_size"] = gen_batch
+
+    training_args = GRPOConfig(**grpo_kw)
 
     from .grpo_env_wrapper import ParlayGRPOEnvWrapper
 
@@ -228,7 +240,7 @@ def train_grpo(
 
     logger.info(
         f"Starting GRPO training: model={sft_model_path}, "
-        f"prompts={len(dataset)}, G={GRPO_GENERATIONS}, steps={steps}"
+        f"prompts={len(dataset)}, G={g}, steps={steps}"
     )
     trainer.train()
     trainer.save_model(output_dir)
@@ -257,7 +269,14 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     GRPO_GENERATIONS = args.g
     model_path = args.base_model or args.model
-    train_grpo(model_path, args.data, args.output, args.steps, min_reward=args.min_reward)
+    train_grpo(
+        model_path,
+        args.data,
+        args.output,
+        args.steps,
+        min_reward=args.min_reward,
+        num_generations=args.g,
+    )
 
     if args.save_curves:
         curves_path = Path(args.save_curves)
