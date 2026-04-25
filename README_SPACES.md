@@ -6,6 +6,7 @@ colorTo: indigo
 sdk: docker
 app_port: 7860
 pinned: true
+tags: ["openenv", "hackathon", "rl", "gametheory"]
 ---
 
 Parlay is a negotiation RL environment and playable browser game where agents bargain under hidden information.  

@@ -5,6 +5,7 @@ colorFrom: indigo
 colorTo: green
 sdk: docker
 pinned: false
+tags: ["openenv", "hackathon", "rl", "gametheory"]
 ---
 
 # Parlay — The RL Negotiation Arena
