@@ -118,9 +118,19 @@ def load_sft_dataset(data_path: Path, min_reward: float = -50.0):
 
 
 def train_sft(
-    data_path: Path, model_id: str, output_dir: Path, min_reward: float = -50.0
+    data_path: Path,
+    model_id: str,
+    output_dir: Path,
+    min_reward: float = -50.0,
+    *,
+    per_device_train_batch_size: int = 2,
+    gradient_accumulation_steps: int = 8,
 ) -> None:
-    """Fine-tune a base model with LoRA via TRL SFTTrainer."""
+    """Fine-tune a base model with LoRA via TRL SFTTrainer.
+
+    Default batch/accum (2×8) keeps effective batch 16 and fits Colab T4 (16GB VRAM) better than 4×4;
+    set higher batch if you have headroom. gradient_checkpointing reduces VRAM at some speed cost.
+    """
     import torch
     from peft import LoraConfig
     from trl import SFTConfig, SFTTrainer
@@ -140,13 +150,14 @@ def train_sft(
     training_args = SFTConfig(
         output_dir=str(output_dir),
         num_train_epochs=3,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=4,
+        per_device_train_batch_size=per_device_train_batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
         learning_rate=2e-4,
         logging_steps=10,
         save_strategy="epoch",
         fp16=True,
         report_to="none",
+        gradient_checkpointing=True,
         **_sft_seq_len_kw(2048),
     )
 
@@ -177,10 +188,29 @@ def main() -> None:
         default=-50.0,
         help="Skip JSONL records with total reward below this (default: -50.0)",
     )
+    parser.add_argument(
+        "--per-device-train-batch-size",
+        type=int,
+        default=2,
+        help="Lower if GPU OOM (default 2, effective batch = this × grad accum)",
+    )
+    parser.add_argument(
+        "--gradient-accumulation-steps",
+        type=int,
+        default=8,
+        help="Default 8 with batch 2 for effective batch 16; raise batch and lower this on large GPUs",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    train_sft(Path(args.data), args.model, Path(args.output), min_reward=args.min_reward)
+    train_sft(
+        Path(args.data),
+        args.model,
+        Path(args.output),
+        min_reward=args.min_reward,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+    )
 
 
 if __name__ == "__main__":
