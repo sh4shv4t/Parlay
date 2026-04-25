@@ -25,6 +25,9 @@ BASE_MODEL = os.getenv("BASE_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
 GRPO_STEPS = int(os.getenv("GRPO_STEPS", "500"))
 GRPO_GENERATIONS = int(os.getenv("GRPO_GENERATIONS", "8"))
 
+# Match docstring: efficiency, tom, anti-capitulation, format
+REWARD_WEIGHTS: list[float] = [3.0, 1.5, 2.0, 0.5]
+
 
 def _row_total_reward(rec: dict) -> float | None:
     v = rec.get("reward")
@@ -216,26 +219,33 @@ def train_grpo(
         "report_to": "none",
         "max_steps": steps,
     }
-    if "generation_batch_size" in set(inspect.signature(GRPOConfig.__init__).parameters):
+    _cfg_sig = set(inspect.signature(GRPOConfig.__init__).parameters)
+    if "generation_batch_size" in _cfg_sig:
         grpo_kw["generation_batch_size"] = gen_batch
+    if "reward_weights" in _cfg_sig:
+        grpo_kw["reward_weights"] = REWARD_WEIGHTS
 
     training_args = GRPOConfig(**grpo_kw)
 
     from .grpo_env_wrapper import ParlayGRPOEnvWrapper
 
-    _trainer = GRPOTrainer(
-        model=sft_model_path,
-        reward_funcs=[
+    _tr_sig = set(inspect.signature(GRPOTrainer.__init__).parameters)
+    _trainer_kw: dict = {
+        "model": sft_model_path,
+        "reward_funcs": [
             negotiation_efficiency_reward,
             tom_accuracy_reward,
             anti_capitulation_reward,
             format_reward,
         ],
-        reward_weights=[3.0, 1.5, 2.0, 0.5],
-        args=training_args,
-        train_dataset=dataset,
-        peft_config=lora_config,
-    )
+        "args": training_args,
+        "train_dataset": dataset,
+        "peft_config": lora_config,
+    }
+    if "reward_weights" in _tr_sig and "reward_weights" not in _cfg_sig:
+        _trainer_kw["reward_weights"] = REWARD_WEIGHTS
+
+    _trainer = GRPOTrainer(**_trainer_kw)
     trainer = ParlayGRPOEnvWrapper(_trainer)
 
     logger.info(
