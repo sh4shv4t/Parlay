@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Parlay — Training Results</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg?v=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=EB+Garamond:ital,wght@0,400;0,500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --felt: #1c2b1a;
+      --felt-light: #2a3d28;
+      --mahogany: #2c1810;
+      --mahogany-light: #3d2518;
+      --cream: #f5f0e8;
+      --gold: #c9a84c;
+      --smoke: #8a8070;
+      --ink: #1a1208;
+      --scarlet: #8b1a1a;
+      --emerald: #1a5c2a;
+      --ivory: #faf6ee;
+      --font-display: "Playfair Display", Georgia, serif;
+      --font-body: "EB Garamond", Georgia, serif;
+      --font-mono: "DM Mono", "Courier New", monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      font-family: var(--font-body);
+      color: var(--cream);
+      background: var(--felt);
+      background-image:
+        repeating-linear-gradient(45deg, rgba(255,255,255,0.02) 0, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 6px);
+    }
+    .page {
+      max-width: 900px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem;
+    }
+    h1 {
+      font-family: var(--font-display);
+      color: var(--gold);
+      font-size: 2rem; font-style: italic; font-weight: 600;
+      margin: 0 0 0.5rem 0;
+    }
+    .subtitle { color: var(--smoke); font-size: 1.1rem; margin: 0 0 1rem; }
+    .badge {
+      display: inline-block; padding: 4px 12px; border-radius: 4px;
+      font-size: 0.75rem; font-family: var(--font-mono); letter-spacing: 0.06em;
+    }
+    .badge.ok { background: #1a3d22; color: #a8d4b0; border: 1px solid var(--emerald); }
+    .badge.wait { background: #3a3018; color: #e8d49a; border: 1px solid var(--gold); }
+    section { margin-top: 2.25rem; }
+    h2 {
+      font-family: var(--font-display); color: var(--gold); font-size: 1.35rem;
+      font-weight: 600; border-bottom: 1px solid rgba(201, 168, 76, 0.35);
+      padding-bottom: 0.35rem; margin-bottom: 1rem;
+    }
+    .card-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    @media (max-width: 700px) { .card-row { grid-template-columns: 1fr; } }
+    .num-card {
+      background: var(--mahogany);
+      border: 1px solid var(--gold);
+      padding: 1rem 1.1rem; border-radius: 4px;
+    }
+    .num-card h3 { margin: 0 0 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--smoke); }
+    .num-card .val { font-family: var(--font-display); font-size: 1.75rem; font-weight: 700; }
+    .num-card .val.scar { color: var(--scarlet); }
+    .num-card .val.smoke { color: var(--smoke); }
+    .num-card .val.gold { color: var(--gold); font-size: 2rem; }
+    .num-card .delta { font-size: 0.8rem; color: var(--emerald); margin-top: 0.35rem; }
+    .fig-placeholder {
+      min-height: 200px; border: 1px dashed rgba(201, 168, 76, 0.4);
+      background: var(--felt-light);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 1.5rem; text-align: center; color: var(--smoke);
+    }
+    .fig-placeholder a { color: var(--gold); }
+    .caption { font-size: 0.9rem; color: var(--smoke); margin-top: 0.5rem; }
+    .transcript-box {
+      max-height: 500px; overflow-y: auto;
+      background: var(--mahogany);
+      border: 1px solid var(--gold);
+      padding: 1rem; border-radius: 4px;
+    }
+    .transcript-box::-webkit-scrollbar { width: 8px; }
+    .transcript-box::-webkit-scrollbar-track { background: var(--felt); }
+    .transcript-box::-webkit-scrollbar-thumb { background: #4a3d28; border-radius: 4px; }
+    .hub-card {
+      border: 2px solid var(--gold); background: var(--mahogany);
+      padding: 1.25rem; border-radius: 4px;
+    }
+    .hub-card.muted { border-color: var(--smoke); opacity: 0.85; }
+    .hub-card a { color: var(--gold); }
+    .btn-gold {
+      display: inline-block; margin-top: 0.75rem;
+      background: var(--gold); color: var(--ink) !important;
+      border: none; padding: 10px 18px; font-family: var(--font-mono);
+      font-size: 0.85rem; cursor: pointer; border-radius: 3px; text-decoration: none;
+    }
+    .btn-gold:hover { filter: brightness(1.05); }
+    details.repro { background: var(--mahogany); border: 1px solid var(--smoke); border-radius: 4px; padding: 0 1rem; }
+    details.repro summary { cursor: pointer; color: var(--gold); padding: 1rem 0; font-weight: 600; }
+    details.repro pre { font-family: var(--font-mono); font-size: 0.8rem; color: var(--cream);
+      background: var(--felt); padding: 1rem; border-radius: 3px; overflow-x: auto; }
+    a.back { color: var(--smoke); text-decoration: none; font-size: 0.9rem; }
+    a.back:hover { color: var(--gold); }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <p><a class="back" href="/">← Back to the Deal Room</a></p>
+
+    <header>
+      <h1>◈ Training Results</h1>
+      <p class="subtitle">Qwen2.5-1.5B fine-tuned with GRPO on Parlay negotiation episodes</p>
+      <p id="status-badge"></p>
+    </header>
+
+    <section>
+      <h2>Key Numbers</h2>
+      <div class="card-row" id="key-numbers">
+        <div class="num-card">
+          <h3>Random Baseline</h3>
+          <div class="val scar" id="k-random">—</div>
+        </div>
+        <div class="num-card">
+          <h3>Base Model</h3>
+          <div class="val smoke" id="k-base">—</div>
+        </div>
+        <div class="num-card">
+          <h3>After GRPO</h3>
+          <div class="val gold" id="k-grpo">—</div>
+          <div class="delta" id="k-delta"></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>GRPO Training Curve</h2>
+      <div id="fig-reward"></div>
+      <p class="caption" id="cap-reward" hidden>Mean episode reward over 120 GRPO training steps. Dashed line = random baseline.</p>
+    </section>
+
+    <section>
+      <h2>Random vs Base vs GRPO</h2>
+      <div id="fig-compare"></div>
+      <p class="caption" id="cap-compare" hidden>Four-bar comparison. Each bar is mean reward over 50 eval episodes.</p>
+    </section>
+
+    <section>
+      <h2>What Changed: Base Model vs Trained Agent</h2>
+      <div id="transcript-container"></div>
+    </section>
+
+    <section>
+      <h2>Model on Hugging Face</h2>
+      <div id="hub-block"></div>
+    </section>
+
+    <section>
+      <h2>How to Reproduce</h2>
+      <details class="repro">
+        <summary>Reproduce this training run</summary>
+        <pre>1. Clone: git clone https://github.com/sh4shv4t/Parlay
+2. Open: training/notebooks/parlay_training.ipynb in Google Colab
+3. Set Colab secrets: GOOGLE_API_KEY, HF_TOKEN
+4. Run all cells (BUDGET_MODE=True, ~$8 of HF compute credits)
+5. Results auto-commit to results/ and push to this Space</pre>
+      </details>
+    </section>
+  </div>
+
+  <script>
+    function fmt(v) {
+      if (v === null || v === undefined) return "—";
+      if (typeof v === "number" && !Number.isNaN(v)) return v.toFixed(1);
+      return String(v);
+    }
+    function renderStatus(data) {
+      const badge = document.getElementById("status-badge");
+      if (data.model_on_hub) {
+        badge.innerHTML = '<span class="badge ok">Model on Hub</span>';
+      } else {
+        badge.innerHTML = '<span class="badge wait">Training not yet run</span>';
+      }
+    }
+    function renderKeyNumbers(data) {
+      const r = data.random_mean_reward, b = data.base_mean_reward, g = data.grpo_mean_reward;
+      document.getElementById("k-random").textContent = fmt(r);
+      document.getElementById("k-base").textContent = fmt(b);
+      document.getElementById("k-grpo").textContent = fmt(g);
+      const d = document.getElementById("k-delta");
+      d.textContent = "";
+      if (typeof g === "number" && typeof r === "number") {
+        const x = g - r;
+        d.textContent = (x >= 0 ? "↑ +" : "↓ ") + x.toFixed(1) + " vs baseline";
+        d.style.color = x >= 0 ? "var(--emerald)" : "var(--scarlet)";
+      }
+    }
+    function rewardSection(pa) {
+      const el = document.getElementById("fig-reward");
+      const cap = document.getElementById("cap-reward");
+      if (pa.reward_curve) {
+        el.innerHTML = '<img src="/results/grpo_reward_curve.png" alt="GRPO reward" style="width:100%;border:1px solid var(--gold);border-radius:2px" />';
+        cap.hidden = false;
+      } else {
+        el.innerHTML = '<div class="fig-placeholder">Training curve will appear here after running the Colab notebook.<br/>' +
+          '<a href="https://colab.research.google.com/github/sh4shv4t/Parlay/blob/main/training/notebooks/parlay_training.ipynb" target="_blank" rel="noopener">→ Open training notebook on Google Colab</a></div>';
+        cap.hidden = true;
+      }
+    }
+    function compareSection(pa) {
+      const el = document.getElementById("fig-compare");
+      const cap = document.getElementById("cap-compare");
+      if (pa.comparison) {
+        el.innerHTML = '<img src="/results/training_curves.png" alt="Comparison" style="width:100%;border:1px solid var(--gold);border-radius:2px" />';
+        cap.hidden = false;
+      } else {
+        el.innerHTML = '<div class="fig-placeholder">Four-bar chart will appear after evaluation.</div>';
+        cap.hidden = true;
+      }
+    }
+    async function transcriptSection(pa) {
+      const c = document.getElementById("transcript-container");
+      if (pa.transcript) {
+        try {
+          const res = await fetch("/results/before_after_transcript.html", { cache: "no-cache" });
+          const html = await res.text();
+          c.innerHTML = '<div class="transcript-box">' + html + '</div>';
+        } catch (e) {
+          c.innerHTML = '<div class="fig-placeholder">Could not load transcript.</div>';
+        }
+      } else {
+        c.innerHTML = '<div class="fig-placeholder">Transcript comparison will appear after evaluation run.</div>';
+      }
+    }
+    function hubSection(data) {
+      const h = document.getElementById("hub-block");
+      if (data.model_on_hub) {
+        h.innerHTML =
+          '<div class="hub-card">' +
+          '<p><strong>Trained model available on Hugging Face Hub</strong></p>' +
+          '<p><a href="https://huggingface.co/sh4shv4t/parlay-negotiator" target="_blank" rel="noopener">→ sh4shv4t/parlay-negotiator</a></p>' +
+          '<button type="button" class="btn-gold" id="btn-try-trained">→ Play against the trained model</button>' +
+          '</div>';
+        document.getElementById("btn-try-trained").addEventListener("click", async () => {
+          try {
+            const r = await fetch("/api/set-opponent", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ model: "trained" }),
+            });
+            if (r.ok) { window.location.href = "/"; }
+            else { const j = await r.json().catch(() => ({})); alert(j.detail || "Could not switch opponent"); }
+          } catch (e) { alert("Request failed"); }
+        });
+      } else {
+        h.innerHTML =
+          '<div class="hub-card muted">' +
+          '<p>Model will be pushed to Hub after training completes.</p>' +
+          '<p style="color:var(--smoke)">huggingface.co/sh4shv4t/parlay-negotiator</p>' +
+          '</div>';
+      }
+    }
+    (async function () {
+      try {
+        const res = await fetch("/api/training-status");
+        const data = await res.json();
+        renderStatus(data);
+        renderKeyNumbers(data);
+        if (data.has_results) {
+          document.querySelector(".subtitle")?.setAttribute("data-has-eval", "1");
+        }
+        rewardSection(data.plots_available);
+        compareSection(data.plots_available);
+        await transcriptSection(data.plots_available);
+        hubSection(data);
+      } catch (e) {
+        document.getElementById("status-badge").innerHTML = '<span class="badge wait">Could not load status</span>';
+      }
+    })();
+  </script>
+</body>
+</html>

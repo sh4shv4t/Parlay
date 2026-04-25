@@ -6,7 +6,9 @@ Mounted at /api in main.py.
 import asyncio
 import json
 import logging
+import os
 import uuid
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -42,6 +44,10 @@ CP_REGEN = 5
 MAX_TURNS = 20
 
 _sessions: dict[str, dict[str, Any]] = {}
+
+# Opponent backend for /api/game/move: "gemini" (default) or "trained" (HF_MODEL_REPO + Qwen)
+OPPONENT_MODE: str = "gemini"
+_RESULTS_DIR = Path("results")
 _CP_COSTS: dict[TacticalMove, int] = {
     TacticalMove.ANCHOR_HIGH: 0,
     TacticalMove.BATNA_REVEAL: 20,
@@ -88,6 +94,10 @@ class SessionStepRequest(BaseModel):
     amount: float = 145_000.0
     message: str = "I propose this amount."
     tactical_move: Optional[str] = None
+
+
+class SetOpponentRequest(BaseModel):
+    model: str  # "trained" | "gemini"
 
 
 def _get_tension(state: ParlayState, player_move: Optional[TacticalMove], opponent_move: Optional[TacticalMove]) -> float:
@@ -312,6 +322,73 @@ async def list_personas() -> dict:
     }
 
 
+def _training_status_payload() -> dict[str, Any]:
+    """Build JSON for GET /api/training-status."""
+    eval_path = _RESULTS_DIR / "eval_results.json"
+    grpo: float | None = None
+    base: float | None = None
+    rnd: float | None = None
+    has_results = False
+    if eval_path.is_file():
+        try:
+            raw = json.loads(eval_path.read_text(encoding="utf-8"))
+            has_results = True
+            grpo = raw.get("grpo_mean_reward")
+            base = raw.get("base_mean_reward")
+            rnd = raw.get("random_mean_reward")
+            if grpo is not None:
+                grpo = float(grpo)
+            if base is not None:
+                base = float(base)
+            if rnd is not None:
+                rnd = float(rnd)
+        except Exception:  # noqa: BLE001
+            has_results = False
+    repo = (os.environ.get("HF_MODEL_REPO") or "").strip() or None
+    return {
+        "has_results": has_results,
+        "grpo_mean_reward": grpo,
+        "base_mean_reward": base,
+        "random_mean_reward": rnd,
+        "model_on_hub": bool(repo),
+        "model_repo": repo,
+        "plots_available": {
+            "reward_curve": (_RESULTS_DIR / "grpo_reward_curve.png").is_file(),
+            "comparison": (_RESULTS_DIR / "training_curves.png").is_file(),
+            "transcript": (_RESULTS_DIR / "before_after_transcript.html").is_file(),
+        },
+    }
+
+
+@router.get("/training-status")
+async def get_training_status() -> dict:
+    """Live stats and plot availability for the Training Results page."""
+    return _training_status_payload()
+
+
+@router.post("/set-opponent")
+async def set_opponent(req: SetOpponentRequest) -> dict:
+    """
+    Switch dashboard game opponent between Gemini and the HF causal model
+    (requires HF_MODEL_REPO when model is \"trained\").
+    """
+    global OPPONENT_MODE
+    m = (req.model or "").strip().lower()
+    if m not in ("trained", "gemini"):
+        raise HTTPException(
+            status_code=400,
+            detail='model must be "trained" or "gemini"',
+        )
+    if m == "trained" and not (os.environ.get("HF_MODEL_REPO") or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="HF_MODEL_REPO is not set — cannot use trained opponent",
+        )
+    OPPONENT_MODE = m
+    logger.info("Opponent mode set to: %s", OPPONENT_MODE)
+    return {"ok": True, "mode": OPPONENT_MODE}
+
+
 @router.post("/game/start")
 async def start_game(req: StartRequest) -> dict:
     """Start a new negotiation session."""
@@ -405,13 +482,35 @@ async def make_move(req: MoveRequest) -> dict:
         else (state.offer_history[-1] if state.offer_history else None)
     )
 
-    opponent_resp = await call_gemini(
-        session["system_prompt"],
-        gemini_messages,
-        persona=state.persona.value,
-        model=MODEL_ID_DEMO,
-        scenario_id=state.scenario_id,
-    )
+    use_trained = OPPONENT_MODE == "trained" and (os.environ.get("HF_MODEL_REPO") or "").strip()
+    if use_trained:
+        try:
+            from agent.hf_opponent import call_hf_opponent
+
+            opponent_resp = await call_hf_opponent(
+                session["system_prompt"],
+                gemini_messages,
+                max_tokens=500,
+                persona=state.persona.value,
+                scenario_id=state.scenario_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("HF opponent failed, falling back to Gemini: %s", exc)
+            opponent_resp = await call_gemini(
+                session["system_prompt"],
+                gemini_messages,
+                persona=state.persona.value,
+                model=MODEL_ID_DEMO,
+                scenario_id=state.scenario_id,
+            )
+    else:
+        opponent_resp = await call_gemini(
+            session["system_prompt"],
+            gemini_messages,
+            persona=state.persona.value,
+            model=MODEL_ID_DEMO,
+            scenario_id=state.scenario_id,
+        )
     opponent_utterance = opponent_resp.get("utterance", "Let me think about that...")
     raw_opp = opponent_resp.get("offer_amount")
     opponent_offer: Optional[float] = None

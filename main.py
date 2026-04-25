@@ -70,6 +70,14 @@ static_dir = Path("dashboard/static")
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+os.makedirs("results", exist_ok=True)
+try:
+    app.mount(
+        "/results", StaticFiles(directory="results"), name="results"
+    )
+except OSError as exc:
+    logger.warning("Could not mount /results: %s", exc)
+
 
 @app.get("/", include_in_schema=False)
 async def serve_index() -> FileResponse:
@@ -85,6 +93,15 @@ async def serve_spectate() -> FileResponse:
     """Serve the spectator dashboard."""
     return FileResponse(
         "dashboard/spectate.html",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
+@app.get("/train", include_in_schema=False)
+async def serve_train_results() -> FileResponse:
+    """Training results: plots, eval JSON, model hub CTA."""
+    return FileResponse(
+        "dashboard/train_results.html",
         headers={"Cache-Control": "no-cache, must-revalidate"},
     )
 
