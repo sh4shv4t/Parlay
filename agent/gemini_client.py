@@ -17,7 +17,19 @@ import sys
 import time
 from typing import Any, Optional
 
+_live_calls: int = 0
+_fallback_calls: int = 0
+_turn_count: int = 0
+
 logger = logging.getLogger(__name__)
+
+
+def get_and_reset_counts() -> tuple[int, int]:
+    global _live_calls, _fallback_calls
+    counts = (_live_calls, _fallback_calls)
+    _live_calls = 0
+    _fallback_calls = 0
+    return counts
 
 # Scenario-aware role: the AI is always the *opponent*; the user is the *player* (buyer
 # in SaaS, seller/candidate in hiring, seller in acquisition).
@@ -322,6 +334,14 @@ async def call_gemini(
         try:
             response = await loop.run_in_executor(None, _call)
 
+            global _live_calls, _turn_count
+            _turn_count += 1
+            _live_calls += 1
+            print(
+                f"[Gemini LIVE] model={mid} chars={len(response.text or '')} turn={_turn_count}",
+                file=sys.stderr,
+            )
+
             text = (response.text or "").strip()
             text = text.replace("```json", "").replace("```", "").strip()
             parsed = json.loads(text)
@@ -352,6 +372,8 @@ async def call_gemini(
         file=sys.stderr,
     )
     logger.warning("Gemini API / parse failed after retries — using text fallback")
+    global _fallback_calls
+    _fallback_calls += 1
     if text:
         return {**SYNTHETIC_RESPONSE, "utterance": text[:300]}
     return SYNTHETIC_RESPONSE

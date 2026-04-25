@@ -26,7 +26,7 @@ from agent.personas import PERSONAS, build_system_prompt
 from agent.tom_tracker import ToMTracker
 from game.scenarios import get_scenario
 
-TOM_DIAGNOSTIC = True  # Set False before full training run
+TOM_DIAGNOSTIC = False  # Set False before full training run
 
 logger = logging.getLogger(__name__)
 
