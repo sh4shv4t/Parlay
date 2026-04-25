@@ -310,7 +310,11 @@ async def call_gemini(
 
     mid = model if model is not None else MODEL_ID_DATA
     text = ""
-    from google.genai import types  # noqa: PLC0415
+    try:
+        from google.genai import types  # noqa: PLC0415
+    except ModuleNotFoundError:
+        logger.warning("google-genai SDK missing; falling back to mock response")
+        return _get_mock_response(persona, len(messages), scenario_id)
 
     history = messages[:-1] if len(messages) > 1 else []
     last_msg = messages[-1]["parts"][0] if messages else "Begin the negotiation."

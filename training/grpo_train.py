@@ -18,18 +18,32 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-BASE_MODEL = os.getenv("BASE_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+# SFT->GRPO pipeline: set BASE_MODEL=checkpoints/sft_1.5b/ after sft_train.py
+# (overridable via BASE_MODEL env var)
+BASE_MODEL = os.getenv("BASE_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
 GRPO_STEPS = int(os.getenv("GRPO_STEPS", "500"))
 GRPO_GENERATIONS = int(os.getenv("GRPO_GENERATIONS", "8"))
 
 
-def build_grpo_dataset(jsonl_path: str):
+def _row_total_reward(rec: dict) -> float | None:
+    v = rec.get("reward")
+    if v is not None:
+        return float(v)
+    v2 = rec.get("cumulative_reward")
+    if v2 is not None:
+        return float(v2)
+    return None
+
+
+def build_grpo_dataset(jsonl_path: str, min_reward: float = -50.0):
     """
     Build GRPO dataset. Each record needs only a 'prompt' field plus metadata.
     The model generates G=8 completions per prompt; grader scores all 8.
 
     Args:
         jsonl_path: Path to the JSONL episodes file.
+        min_reward: Drop train rows with total reward (reward / cumulative_reward) below this
+            (missing reward fields are kept for backward compatibility).
 
     Returns:
         HuggingFace Dataset with prompt + metadata columns.
@@ -40,21 +54,31 @@ def build_grpo_dataset(jsonl_path: str):
         raise ImportError("Install datasets: pip install datasets") from exc
 
     prompts = []
+    filtered = 0
     with open(jsonl_path, encoding="utf-8") as f:
         for line in f:
             rec = json.loads(line.strip())
-            if rec.get("split") == "train":
-                # Extract ZOPA metadata for reward functions
-                prompts.append({
+            if rec.get("split") != "train":
+                continue
+            r = _row_total_reward(rec)
+            if r is not None and r < min_reward:
+                filtered += 1
+                continue
+            # Extract ZOPA metadata for reward functions
+            prompts.append(
+                {
                     "prompt": rec["prompt"],
                     "scenario_id": rec.get("scenario_id", ""),
                     "persona": rec.get("persona", ""),
-                    # Reward function kwargs (passed through dataset)
                     "batna_seller": _get_batna(rec.get("scenario_id", ""), "seller"),
-                    "batna_buyer":  _get_batna(rec.get("scenario_id", ""), "buyer"),
-                    "zopa_width":   _get_zopa_width(rec.get("scenario_id", "")),
-                })
-    logger.info(f"GRPO dataset: {len(prompts)} prompts")
+                    "batna_buyer": _get_batna(rec.get("scenario_id", ""), "buyer"),
+                    "zopa_width": _get_zopa_width(rec.get("scenario_id", "")),
+                }
+            )
+    print(
+        f"Filtered {filtered} records below min_reward={min_reward}, "
+        f"{len(prompts)} remaining for GRPO"
+    )
     return Dataset.from_list(prompts)
 
 
@@ -62,7 +86,7 @@ def _get_batna(scenario_id: str, side: str) -> float:
     """Lookup BATNA for a scenario without importing game module at training time."""
     batnas: dict[str, dict[str, float]] = {
         "saas_enterprise":        {"seller": 125_000,    "buyer": 165_000},
-        "hiring_package":         {"seller": 195_000,    "buyer": 230_000},
+        "hiring_package":         {"seller": 195_000,    "buyer": 264_500},  # match game/scenarios (widened zopa)
         "acquisition_term_sheet": {"seller": 10_500_000, "buyer": 16_000_000},
     }
     return float(batnas.get(scenario_id, {}).get(side, 0))
@@ -80,6 +104,7 @@ def train_grpo(
     data_path: str,
     output_dir: str,
     steps: int = 500,
+    min_reward: float = -50.0,
 ) -> None:
     """
     GRPO training loop.
@@ -117,7 +142,7 @@ def train_grpo(
         format_reward,
     )
 
-    dataset = build_grpo_dataset(data_path)
+    dataset = build_grpo_dataset(data_path, min_reward=min_reward)
     if len(dataset) == 0:
         raise ValueError("Empty GRPO dataset. Run generate_data.py first.")
 
@@ -181,6 +206,12 @@ def main() -> None:
     parser.add_argument("--model", default="models/parlay-sft")
     parser.add_argument("--base_model", default="")
     parser.add_argument("--data", default="data/episodes.jsonl")
+    parser.add_argument(
+        "--min-reward",
+        type=float,
+        default=-50.0,
+        help="Skip JSONL train rows with total reward below this (default: -50.0)",
+    )
     parser.add_argument("--output", default="models/parlay-grpo")
     parser.add_argument("--steps", type=int, default=GRPO_STEPS)
     parser.add_argument("--g", type=int, default=GRPO_GENERATIONS)
@@ -191,7 +222,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     GRPO_GENERATIONS = args.g
     model_path = args.base_model or args.model
-    train_grpo(model_path, args.data, args.output, args.steps)
+    train_grpo(model_path, args.data, args.output, args.steps, min_reward=args.min_reward)
 
     if args.save_curves:
         curves_path = Path(args.save_curves)

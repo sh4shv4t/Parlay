@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .models import BeliefState, HiddenState, ParlayAction, ParlayState
-from .reward import ALPHA, BETA, DELTA, EPSILON, GAMMA, OMEGA, PSI, THETA, ZETA
+from .reward import ALPHA, BETA, DELTA, EPSILON, GAMMA, MU, OMEGA, PSI, THETA, ZETA
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,7 @@ def compute_step_reward(
     state: ParlayState,
     action: ParlayAction,
     next_state: ParlayState,
+    drift_event: str | None = None,
 ) -> float:
     """
     Compute per-step reward R_t.
@@ -151,21 +152,39 @@ def compute_step_reward(
     ):
         bluff_bonus = PSI
 
+    mev_bonus = 0.0
+    drift_marker = drift_event
+    if drift_marker is None:
+        drift_marker = next_state.__dict__.get("drift_event")
+    if drift_marker:
+        lowered = action.utterance.lower()
+        adaptation_tokens = (
+            "given that",
+            "considering",
+            "in light of",
+            "noted",
+            "understood",
+        )
+        if any(token in lowered for token in adaptation_tokens):
+            mev_bonus = MU
+
     reward = (
         ALPHA * delta_v
         + BETA * tom_t
         - DELTA * concession_t
         - THETA * noise_t
         + bluff_bonus
+        + mev_bonus
     )
     logger.debug(
-        "Step reward: total=%.3f (dv=%.3f, tom=%.3f, concession=%.3f, noise=%.0f, bluff=%.3f)",
+        "Step reward: total=%.3f (dv=%.3f, tom=%.3f, concession=%.3f, noise=%.0f, bluff=%.3f, mev=%.3f)",
         reward,
         delta_v,
         tom_t,
         concession_t,
         noise_t,
         bluff_bonus,
+        mev_bonus,
     )
     return reward
 

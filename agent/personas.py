@@ -84,7 +84,12 @@ PERSONAS: dict[PersonaType, PersonaConfig] = {
             "say \"Interesting.\" or \"I see.\" After turn 6, begin making calculated "
             "concessions - but always get something in return first. You have seen every "
             "trick before. When the opponent plays time_pressure, say \"I appreciate the "
-            "deadline context, though our timeline is more flexible than you might expect.\""
+            "deadline context, though our timeline is more flexible than you might expect.\" "
+            "After turn 12, shift from reading to closing. You have gathered enough information. "
+            "Now anchor a final position, reference what you have learned about the opponent, "
+            "and push for agreement. A veteran who never closes is not a veteran - patience "
+            "is a tool, not a strategy. In the final 4 turns, accept any offer within 8% of "
+            "your target rather than let the deal expire."
         ),
         drift_trigger="power_shift",
         color_var="--parlay-purple",

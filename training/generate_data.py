@@ -33,6 +33,32 @@ REQUIRED_COMBINATIONS = [
     for scenario in ["saas_enterprise", "hiring_package", "acquisition_term_sheet"]
 ]
 
+# Weighted to oversample historically low deal-rate combinations (total weight = 15)
+COMBO_WEIGHTS: dict[tuple[str, str], int] = {
+    ("veteran", "hiring_package"): 3,
+    ("veteran", "saas_enterprise"): 2,
+    ("veteran", "acquisition_term_sheet"): 2,
+    ("shark", "hiring_package"): 2,
+    ("diplomat", "hiring_package"): 2,
+    ("shark", "saas_enterprise"): 1,
+    ("shark", "acquisition_term_sheet"): 1,
+    ("diplomat", "saas_enterprise"): 1,
+    ("diplomat", "acquisition_term_sheet"): 1,
+}
+WEIGHTED_COMBO_LIST: list[tuple[str, str]] = []
+for _pair, _weight in COMBO_WEIGHTS.items():
+    WEIGHTED_COMBO_LIST.extend([_pair] * _weight)
+
+
+def _row_total_reward(record: dict) -> float | None:
+    v = record.get("reward")
+    if v is not None:
+        return float(v)
+    v2 = record.get("cumulative_reward")
+    if v2 is not None:
+        return float(v2)
+    return None
+
 
 def is_quality_episode(grade, args) -> tuple[bool, str]:
     """
@@ -308,7 +334,8 @@ async def run_inspect_mode(args) -> None:
 
 async def run_diversity_pass(args, output_path: Path) -> None:
     """
-    Generate a quality-filtered dataset with guaranteed persona x scenario coverage.
+    Generate a quality-filtered dataset; persona x scenario is weighted-sampled
+    (see COMBO_WEIGHTS / WEIGHTED_COMBO_LIST).
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     coverage: dict[tuple[str, str], int] = defaultdict(int)
@@ -316,169 +343,111 @@ async def run_diversity_pass(args, output_path: Path) -> None:
     kept_records: list[dict] = []
     generated = 0
     discarded = 0
+    skipped_min_reward = 0
     seed = 0
-    min_per_combo = max(2, args.episodes // len(REQUIRED_COMBINATIONS))
     total_live_calls: int = 0
     total_fallback_calls: int = 0
     _verbose = not getattr(args, "quiet", False)
+    _checkpoints = {20, 40, 60, 80, 100, 120, 140}
+
+    def _emit_checkpoint(_ep_num: int) -> None:
+        if not _verbose or _ep_num not in _checkpoints:
+            return
+        _all_rewards = [r.get("reward", 0.0) for r in kept_records]
+        _all_eff = [r.get("deal_efficiency", 0.0) for r in kept_records]
+        _combos_covered = len({(r["persona"], r["scenario_id"]) for r in kept_records})
+        print(f"\n{'━' * 40}", file=sys.stderr)
+        print(f"[CHECKPOINT {_ep_num}/{args.episodes}]", file=sys.stderr)
+        print(
+            f"  Kept so far     : {_ep_num}/{generated}  ({100 * _ep_num / max(generated, 1):.1f}%)",
+            file=sys.stderr,
+        )
+        print(f"  Mean reward     : {statistics.mean(_all_rewards):.2f}", file=sys.stderr)
+        print(f"  Mean efficiency : {statistics.mean(_all_eff):.3f}", file=sys.stderr)
+        print(f"  Combos covered  : {_combos_covered}/9", file=sys.stderr)
+        print(f"  Min-reward skip : {skipped_min_reward}", file=sys.stderr)
+        print(f"  Live calls total: {total_live_calls}", file=sys.stderr)
+        print(f"  Fallback total  : {total_fallback_calls}", file=sys.stderr)
+        print(f"{'━' * 40}\n", file=sys.stderr)
 
     with open(output_path, "w", encoding="utf-8") as out_f:
         while len(kept_records) < args.episodes:
-            progress_made = False
-            for persona, scenario_id in REQUIRED_COMBINATIONS:
-                if len(kept_records) >= args.episodes:
-                    break
-                if coverage[(persona, scenario_id)] >= min_per_combo:
-                    continue
+            persona, scenario_id = random.choice(WEIGHTED_COMBO_LIST)
+            record = await _run_one(persona, scenario_id, seed=seed, max_turns=args.max_turns)
+            seed += 1
+            generated += 1
+            if record is None:
+                _live_n, _fall_n = get_and_reset_counts()
+                total_live_calls += _live_n
+                total_fallback_calls += _fall_n
+                continue
 
-                record = await _run_one(persona, scenario_id, seed=seed, max_turns=args.max_turns)
-                seed += 1
-                generated += 1
-                if record is None:
-                    _live_n, _fall_n = get_and_reset_counts()
-                    total_live_calls += _live_n
-                    total_fallback_calls += _fall_n
-                    continue
-
-                keep, reason = is_quality_episode(
-                    _grade_proxy_from_record(record),
-                    args,
-                )
-                if not keep:
-                    discarded += 1
-                    _live_d, _fall_d = get_and_reset_counts()
-                    total_live_calls += _live_d
-                    total_fallback_calls += _fall_d
-                    if _verbose:
-                        print(
-                            f"[EP --/{args.episodes:02d}] "
-                            f"{persona}×{scenario_id:<27s} | "
-                            f"reward={record.get('reward', 0.0):+.2f} | "
-                            f"eff={record.get('deal_efficiency', 0.0):.3f} | "
-                            f"kept=NO  | "
-                            f"total_kept={len(kept_records)}/{generated} | "
-                            f"gemini_live={_live_d} fallback={_fall_d}",
-                            file=sys.stderr,
-                        )
-                    continue
-
-                out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
-                kept_records.append(record)
-                _live, _fall = get_and_reset_counts()
-                total_live_calls += _live
-                total_fallback_calls += _fall
-                _ep_num = len(kept_records)
+            rw = _row_total_reward(record)
+            if rw is not None and rw < args.min_reward:
+                skipped_min_reward += 1
+                _live_m, _fall_m = get_and_reset_counts()
+                total_live_calls += _live_m
+                total_fallback_calls += _fall_m
                 if _verbose:
-                    _reward = record.get("reward", 0.0)
-                    _eff = record.get("deal_efficiency", 0.0)
-                    _combo = f"{record['persona']}×{record['scenario_id']}"
                     print(
-                        f"[EP {_ep_num:02d}/{args.episodes:02d}] "
-                        f"{_combo:<35s} | "
-                        f"reward={_reward:+.2f} | "
-                        f"eff={_eff:.3f} | "
-                        f"kept=YES | "
-                        f"total_kept={_ep_num}/{generated} | "
-                        f"gemini_live={_live} fallback={_fall}",
+                        f"[min_reward skip #{skipped_min_reward}] {persona} x {scenario_id} "
+                        f"reward={rw:.2f} < {args.min_reward}",
                         file=sys.stderr,
                     )
-                    if _ep_num in (20, 40, 60):
-                        _all_rewards = [r.get("reward", 0.0) for r in kept_records]
-                        _all_eff = [r.get("deal_efficiency", 0.0) for r in kept_records]
-                        _combos_covered = len({(r["persona"], r["scenario_id"]) for r in kept_records})
-                        print(f"\n{'━' * 40}", file=sys.stderr)
-                        print(f"[CHECKPOINT {_ep_num}/{args.episodes}]", file=sys.stderr)
-                        print(
-                            f"  Kept so far     : {_ep_num}/{generated}  ({100 * _ep_num / max(generated, 1):.1f}%)",
-                            file=sys.stderr,
-                        )
-                        print(f"  Mean reward     : {statistics.mean(_all_rewards):.2f}", file=sys.stderr)
-                        print(f"  Mean efficiency : {statistics.mean(_all_eff):.3f}", file=sys.stderr)
-                        print(f"  Combos covered  : {_combos_covered}/9", file=sys.stderr)
-                        print(f"  Live calls total: {total_live_calls}", file=sys.stderr)
-                        print(f"  Fallback total  : {total_fallback_calls}", file=sys.stderr)
-                        print(f"{'━' * 40}\n", file=sys.stderr)
-                coverage[(persona, scenario_id)] += 1
-                kept_reason_counts[reason] += 1
-                progress_made = True
+                continue
 
-            if len(kept_records) >= args.episodes:
-                break
+            keep, reason = is_quality_episode(
+                _grade_proxy_from_record(record),
+                args,
+            )
+            if not keep:
+                discarded += 1
+                _live_d, _fall_d = get_and_reset_counts()
+                total_live_calls += _live_d
+                total_fallback_calls += _fall_d
+                if _verbose:
+                    print(
+                        f"[EP --/{args.episodes:02d}] "
+                        f"{persona}×{scenario_id:<27s} | "
+                        f"reward={record.get('reward', 0.0):+.2f} | "
+                        f"eff={record.get('deal_efficiency', 0.0):.3f} | "
+                        f"kept=NO  | "
+                        f"total_kept={len(kept_records)}/{generated} | "
+                        f"gemini_live={_live_d} fallback={_fall_d}",
+                        file=sys.stderr,
+                    )
+                continue
 
-            if not progress_made:
-                persona, scenario_id = random.choice(REQUIRED_COMBINATIONS)
-                record = await _run_one(persona, scenario_id, seed=seed, max_turns=args.max_turns)
-                seed += 1
-                generated += 1
-                if record is None:
-                    _live_n, _fall_n = get_and_reset_counts()
-                    total_live_calls += _live_n
-                    total_fallback_calls += _fall_n
-                    continue
-                keep, reason = is_quality_episode(
-                    _grade_proxy_from_record(record),
-                    args,
+            out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            out_f.flush()
+            kept_records.append(record)
+            _live, _fall = get_and_reset_counts()
+            total_live_calls += _live
+            total_fallback_calls += _fall
+            _ep_num = len(kept_records)
+            if _verbose:
+                _reward = record.get("reward", 0.0)
+                _eff = record.get("deal_efficiency", 0.0)
+                _combo = f"{record['persona']}×{record['scenario_id']}"
+                print(
+                    f"[EP {_ep_num:02d}/{args.episodes:02d}] "
+                    f"{_combo:<35s} | "
+                    f"reward={_reward:+.2f} | "
+                    f"eff={_eff:.3f} | "
+                    f"kept=YES | "
+                    f"total_kept={_ep_num}/{generated} | "
+                    f"gemini_live={_live} fallback={_fall}",
+                    file=sys.stderr,
                 )
-                if keep:
-                    out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
-                    kept_records.append(record)
-                    _live, _fall = get_and_reset_counts()
-                    total_live_calls += _live
-                    total_fallback_calls += _fall
-                    _ep_num = len(kept_records)
-                    if _verbose:
-                        _reward = record.get("reward", 0.0)
-                        _eff = record.get("deal_efficiency", 0.0)
-                        _combo = f"{record['persona']}×{record['scenario_id']}"
-                        print(
-                            f"[EP {_ep_num:02d}/{args.episodes:02d}] "
-                            f"{_combo:<35s} | "
-                            f"reward={_reward:+.2f} | "
-                            f"eff={_eff:.3f} | "
-                            f"kept=YES | "
-                            f"total_kept={_ep_num}/{generated} | "
-                            f"gemini_live={_live} fallback={_fall}",
-                            file=sys.stderr,
-                        )
-                        if _ep_num in (20, 40, 60):
-                            _all_rewards = [r.get("reward", 0.0) for r in kept_records]
-                            _all_eff = [r.get("deal_efficiency", 0.0) for r in kept_records]
-                            _combos_covered = len({(r["persona"], r["scenario_id"]) for r in kept_records})
-                            print(f"\n{'━' * 40}", file=sys.stderr)
-                            print(f"[CHECKPOINT {_ep_num}/{args.episodes}]", file=sys.stderr)
-                            print(
-                                f"  Kept so far     : {_ep_num}/{generated}  ({100 * _ep_num / max(generated, 1):.1f}%)",
-                                file=sys.stderr,
-                            )
-                            print(f"  Mean reward     : {statistics.mean(_all_rewards):.2f}", file=sys.stderr)
-                            print(f"  Mean efficiency : {statistics.mean(_all_eff):.3f}", file=sys.stderr)
-                            print(f"  Combos covered  : {_combos_covered}/9", file=sys.stderr)
-                            print(f"  Live calls total: {total_live_calls}", file=sys.stderr)
-                            print(f"  Fallback total  : {total_fallback_calls}", file=sys.stderr)
-                            print(f"{'━' * 40}\n", file=sys.stderr)
-                    coverage[(persona, scenario_id)] += 1
-                    kept_reason_counts[reason] += 1
-                else:
-                    discarded += 1
-                    _live_d, _fall_d = get_and_reset_counts()
-                    total_live_calls += _live_d
-                    total_fallback_calls += _fall_d
-                    if _verbose:
-                        print(
-                            f"[EP --/{args.episodes:02d}] "
-                            f"{persona}×{scenario_id:<27s} | "
-                            f"reward={record.get('reward', 0.0):+.2f} | "
-                            f"eff={record.get('deal_efficiency', 0.0):.3f} | "
-                            f"kept=NO  | "
-                            f"total_kept={len(kept_records)}/{generated} | "
-                            f"gemini_live={_live_d} fallback={_fall_d}",
-                            file=sys.stderr,
-                        )
+                _emit_checkpoint(_ep_num)
+            coverage[(persona, scenario_id)] += 1
+            kept_reason_counts[reason] += 1
 
     discard_pct = (discarded / max(generated, 1)) * 100.0
     print(
         f"Generated: {generated} episodes | Kept: {len(kept_records)} | "
-        f"Discarded: {discarded} ({discard_pct:.0f}%)"
+        f"Discarded: {discarded} ({discard_pct:.0f}%) | "
+        f"Skipped (min_reward < {args.min_reward}): {skipped_min_reward}"
     )
     reasons_str = ", ".join(f"{reason}={count}" for reason, count in sorted(kept_reason_counts.items()))
     print(f"Reasons kept: {reasons_str or 'none'}")
@@ -488,9 +457,9 @@ async def run_diversity_pass(args, output_path: Path) -> None:
 
     _fallback_rate = 100.0 * total_fallback_calls / max(total_live_calls + total_fallback_calls, 1)
     _verdict = (
-        "ALL CALLS LIVE — data is real"
+        "ALL CALLS LIVE - data is real"
         if _fallback_rate < 5.0
-        else "WARNING: fallback rate high — check API key and rate limits"
+        else "WARNING: fallback rate high - check API key and rate limits"
     )
     print(f"\nGemini API health:")
     print(f"  Total live calls  : {total_live_calls}")
@@ -501,8 +470,14 @@ async def run_diversity_pass(args, output_path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate Parlay training data")
-    parser.add_argument("--episodes", type=int, default=80)
+    parser.add_argument("--episodes", type=int, default=140)
     parser.add_argument("--output", type=str, default="data/episodes.jsonl")
+    parser.add_argument(
+        "--min-reward",
+        type=float,
+        default=-50.0,
+        help="After grading, do not write episodes with total reward below this (default: -50.0)",
+    )
     parser.add_argument(
         "--quality_filter",
         action="store_true",

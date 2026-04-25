@@ -1,4 +1,8 @@
-"""Reward function constants. Import from here everywhere — never hardcode coefficients."""
+"""Reward function constants. Import from here everywhere — never hardcode coefficients.
+
+Per-step reward form:
+    R_t = α·ΔV + β·ToM - δ·C - θ·noise + ψ·bluff + μ·MEV
+"""
 
 # Per-step weights
 ALPHA: float = 2.0    # offer improvement toward ZOPA midpoint
@@ -13,6 +17,7 @@ ZETA: float    = 15.0   # drift adaptation bonus
 ETA: float     = 0.0    # retained for compatibility; single-act env disables it
 OMEGA: float   = 200.0  # capitulation cliff (hard discontinuous penalty)
 PSI: float     = 12.0   # bluff-caught bonus
+MU: float      = 8.0    # drift-event recognition bonus (MEV proxy)
 
 # Game config defaults (overridden by env vars at runtime)
 MAX_TURNS: int = 20

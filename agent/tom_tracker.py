@@ -10,6 +10,11 @@ from parlay_env.models import BeliefState, HiddenState, PersonaType, TacticalMov
 
 logger = logging.getLogger(__name__)
 
+# NOTE: ToMTracker is used in two paths:
+# (1) agent/runner.py self-play — full update each turn;
+# (2) parlay_env/server.py WebSocket server — also uses ToMTracker after Task 1 fix.
+# Both paths now produce comparable belief_history for grader._tom_accuracy.
+
 
 class ToMTracker:
     """

@@ -190,7 +190,11 @@ async def run_episode(
                 f"You are the human buyer in this negotiation. "
                 f"Respond naturally to the AI seller.\n"
                 f"Scenario: {scenario.title}. "
-                f"Your budget ceiling: {hidden.budget_ceiling:,.0f}"
+                f"Your budget ceiling: {hidden.budget_ceiling:,.0f}\n"
+                f"Occasionally (roughly 1 in 4 turns), make a claim about having a competing offer "
+                f"or a lower budget than you actually have. State a BATNA that is 20-30% away from "
+                f"your true position. This is realistic negotiation behavior and tests whether the "
+                f"agent can detect bluffing."
             ),
             opponent_messages,
             persona=persona.value,

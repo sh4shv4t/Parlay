@@ -26,7 +26,7 @@ from parlay_env.game_theory import (
 )
 from parlay_env.grader import compute_step_reward, compute_terminal_reward
 from parlay_env.grader import detect_bluff_challenge
-from parlay_env.reward import OMEGA, PSI
+from parlay_env.reward import MU, OMEGA, PSI
 from parlay_env.models import (
     BeliefState, HiddenState, ParlayAction, ParlayState, PersonaType,
 )
@@ -199,6 +199,25 @@ class TestGrader:
         reward = compute_step_reward(parlay_state, action, next_state)
         assert caught is True, f"Expected True, got {caught}"
         assert reward >= PSI, f"Expected at least {PSI}, got {reward}"
+
+    def test_mev_bonus_requires_drift_event(self, parlay_state):
+        """MEV bonus only activates when a drift event marker is present."""
+        action = ParlayAction(
+            utterance="Given that the market shifted, I can adjust.",
+            tactical_move=None,
+        )
+
+        no_drift_state = ParlayState(**{**parlay_state.model_dump(), "step_count": 1})
+        reward_no_drift = compute_step_reward(parlay_state, action, no_drift_state)
+
+        with_drift_state = ParlayState(**{**parlay_state.model_dump(), "step_count": 1})
+        with_drift_state.__dict__["drift_event"] = "Competitor drops price 15%"
+        reward_with_drift = compute_step_reward(parlay_state, action, with_drift_state)
+
+        assert reward_with_drift >= reward_no_drift + MU, (
+            f"Expected drift reward boost >= {MU}, got "
+            f"{reward_with_drift - reward_no_drift}"
+        )
 
     def test_zopa_collapse_walkaway_keyless(self):
         """Repeated high tension collapses the ZOPA and forces walk-away."""

@@ -17,6 +17,9 @@ from typing import Any
 import numpy as np
 from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
 
+from agent.tom_tracker import ToMTracker
+from game.scenarios import get_scenario
+
 from .exceptions import (
     EpisodeAlreadyDoneError,
     InvalidActionError,
@@ -67,7 +70,7 @@ FALLBACK_OBSERVATION = ParlayObservation(
     cumulative_reward=0.0,
 )
 
-_sessions: dict[str, ParlayState] = {}
+_sessions: dict[str, dict[str, Any]] = {}
 
 MAX_TURNS = int(os.getenv("MAX_TURNS_PER_EPISODE", "20"))
 CP_START = int(os.getenv("CREDIBILITY_POINTS_START", "100"))
@@ -131,6 +134,27 @@ def _compute_tension(state: ParlayState, action: ParlayAction) -> float:
     elif action.tactical_move == TacticalMove.SILENCE:
         base += 5.0
     return float(max(0.0, min(100.0, base)))
+
+
+def _apply_drift_event(state: ParlayState, tom: ToMTracker) -> str | None:
+    """Apply scenario drift event at the current turn, if any."""
+    try:
+        scenario = get_scenario(state.scenario_id)
+    except Exception:
+        return None
+
+    for event in scenario.drift_events:
+        if event.trigger_turn == state.step_count:
+            state.drift_events_fired += 1
+            state.hidden_state.persona_drifted = True
+            tom.drift_event(
+                event.effect_on_urgency,
+                event.effect_on_has_alternative,
+                event_description=event.event,
+            )
+            state.belief_history = list(tom.history)
+            return event.event
+    return None
 
 
 def _make_observation(
@@ -260,7 +284,10 @@ async def _handle_reset(msg: dict[str, Any]) -> dict:
         original_zopa_width=original_zopa_width,
         zopa_width_pct_remaining=1.0,
     )
-    _sessions[session_id] = state
+    _sessions[session_id] = {
+        "state": state,
+        "tom_tracker": ToMTracker(initial_belief, persona),
+    }
 
     observation = _make_observation(state, 0.0, "Negotiation started. Make your opening move.")
     logger.info("Reset: session=%s, scenario=%s, persona=%s", session_id, scenario_id, persona_str)
@@ -273,7 +300,9 @@ async def _handle_step(msg: dict[str, Any]) -> dict:
     if not session_id or session_id not in _sessions:
         raise SessionNotFoundError(f"Session {session_id} not found")
 
-    state = _sessions[session_id]
+    session = _sessions[session_id]
+    state: ParlayState = session["state"]
+    tom: ToMTracker = session["tom_tracker"]
     if state.episode_done:
         raise EpisodeAlreadyDoneError(f"Episode {session_id} is already done")
 
@@ -291,17 +320,13 @@ async def _handle_step(msg: dict[str, Any]) -> dict:
     if action.offer_amount is not None:
         new_offers.append(action.offer_amount)
 
-    new_beliefs = list(state.belief_history)
-    if new_beliefs:
-        last = new_beliefs[-1]
-        updated = BeliefState(
-            est_budget=last.est_budget * 0.98,
-            est_walk_away=last.est_walk_away * 1.01,
-            est_urgency=min(1.0, last.est_urgency + 0.02),
-            est_has_alternative=last.est_has_alternative,
-            confidence=min(1.0, last.confidence + 0.05),
-        )
-        new_beliefs.append(updated)
+    tom.update(
+        observed_offer=action.offer_amount,
+        observed_move=action.tactical_move,
+        utterance=action.utterance,
+        turn=state.step_count + 1,
+    )
+    new_beliefs = list(tom.history)
 
     next_state = ParlayState(
         **{
@@ -314,6 +339,8 @@ async def _handle_step(msg: dict[str, Any]) -> dict:
             "hidden_state": HiddenState(**state.hidden_state.model_dump()),
         }
     )
+    # Keep belief history aligned with ToM tracker history (single source of truth).
+    next_state.belief_history = new_beliefs
 
     if action.tactical_move == TacticalMove.BATNA_REVEAL:
         revealed = action.offer_amount if action.offer_amount is not None else next_state.hidden_state.walk_away_price
@@ -349,7 +376,8 @@ async def _handle_step(msg: dict[str, Any]) -> dict:
             <= next_state.hidden_state.budget_ceiling
         )
 
-    step_reward = compute_step_reward(state, action, next_state)
+    drift_event = _apply_drift_event(next_state, tom)
+    step_reward = compute_step_reward(state, action, next_state, drift_event=drift_event)
     next_state.cumulative_reward = state.cumulative_reward + step_reward
 
     if step_reward >= 0.0 and action.tactical_move is None and state.hidden_state.last_stated_batna is not None:
@@ -378,8 +406,8 @@ async def _handle_step(msg: dict[str, Any]) -> dict:
         else:
             next_state.termination_reason = "max_turns"
 
-    _sessions[session_id] = next_state
-    observation = _make_observation(next_state, step_reward, action.utterance)
+    _sessions[session_id] = {"state": next_state, "tom_tracker": tom}
+    observation = _make_observation(next_state, step_reward, action.utterance, drift_event=drift_event)
     return {"observation": observation.model_dump(), "done": next_state.episode_done}
 
 
@@ -388,12 +416,15 @@ async def _handle_state(msg: dict[str, Any]) -> dict:
     session_id = msg.get("session_id")
     if not session_id or session_id not in _sessions:
         raise SessionNotFoundError(f"Session {session_id} not found")
-    return {"state": _sessions[session_id].model_dump()}
+    return {"state": _sessions[session_id]["state"].model_dump()}
 
 
 def get_session_state(session_id: str) -> ParlayState | None:
     """Return the in-memory session state for SSE and tests."""
-    return _sessions.get(session_id)
+    session = _sessions.get(session_id)
+    if not session:
+        return None
+    return session["state"]
 
 
 @router.get("/sessions/{session_id}")
@@ -401,7 +432,7 @@ async def get_session(session_id: str) -> dict:
     """Get session state via REST."""
     if session_id not in _sessions:
         raise SessionNotFoundError(f"Session {session_id} not found")
-    return {"state": _sessions[session_id].model_dump()}
+    return {"state": _sessions[session_id]["state"].model_dump()}
 
 
 _env_app = FastAPI(title="Parlay OpenEnv", version="1.0.0")

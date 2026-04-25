@@ -34,7 +34,8 @@ test:
 	venv\Scripts\pytest tests/ -v
 
 train-data:
-	venv-train\Scripts\python -m training.generate_data --episodes 2000 --output data/episodes.jsonl
+	# hackathon budget default; override with EPISODES=N
+	venv-train\Scripts\python -m training.generate_data --episodes 80 --output data/episodes.jsonl
 
 train-sft:
 	venv-train\Scripts\python -m training.sft_train --model Qwen/Qwen2.5-7B-Instruct --data data/episodes.jsonl --output models/parlay-sft --threshold 0.30

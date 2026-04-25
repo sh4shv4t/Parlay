@@ -1,0 +1,130 @@
+env_id: parlay-negotiation-v1
+name: Parlay
+description: >
+  A negotiation MDP with hidden information, Theory-of-Mind belief tracking,
+  dynamic ZOPA erosion, and tactical moves. Three personas × three scenarios.
+version: "1.0.0"
+author: Shashvat Singh
+contact: shashvat.k.singh.16@gmail.com
+
+observation_space:
+  type: dict
+  fields:
+    - name: offers
+      type: list[float]
+    - name: zopa_lower
+      type: float
+    - name: zopa_upper
+      type: float
+    - name: nash_point
+      type: float
+    - name: tension_score
+      type: float
+      range: [0, 100]
+    - name: belief_state
+      type: dict
+      description: Agent's beliefs about opponent hidden state (est_budget, est_walk_away, est_urgency, est_has_alternative, confidence)
+    - name: last_utterance
+      type: string
+    - name: available_moves
+      type: list[string]
+      values: [anchor_high, batna_reveal, silence]
+    - name: cp
+      type: int
+      description: Tactical card points remaining
+    - name: drift_event
+      type: string|null
+      description: Human-readable drift event if triggered this turn, else null
+    - name: zopa_width_pct_remaining
+      type: float
+      range: [0.0, 1.0]
+
+action_space:
+  type: dict
+  fields:
+    - name: utterance
+      type: string
+      required: true
+    - name: offer_amount
+      type: float|null
+    - name: tactical_move
+      type: string|null
+      values: [anchor_high, batna_reveal, silence]
+    - name: accept_deal
+      type: bool
+      default: false
+    - name: walk_away
+      type: bool
+      default: false
+
+reward:
+  range: [-200, ~300]
+  per_step: "α·ΔV + β·ToM - δ·C - θ·noise + ψ·bluff + μ·MEV"
+  terminal: "γ·E + ε·S + ζ·D  (or -ω on capitulation)"
+  constants:
+    ALPHA: 2
+    BETA: 5
+    DELTA: 3
+    THETA: 10
+    PSI: 12
+    MU: 8
+    GAMMA: 100
+    EPSILON: 20
+    ZETA: 15
+    OMEGA: 200
+
+episode:
+  max_steps: 20
+  termination_conditions:
+    - deal accepted (offers within 3%)
+    - walk_away action
+    - max turns reached
+    - zopa_collapsed (BATNAs cross after erosion)
+    - step_reward below threshold (very negative)
+
+endpoints:
+  websocket: ws://host:port/env/ws
+  protocol:
+    reset:
+      send: '{"type": "reset", "scenario_id": "saas_enterprise|hiring_package|acquisition_term_sheet", "persona": "shark|diplomat|veteran"}'
+      receive: ParlayObservation (JSON)
+    step:
+      send: ParlayAction (JSON)
+      receive: ParlayObservation (JSON)
+    state:
+      send: '{"type": "state"}'
+      receive: ParlayState (JSON, includes hidden state for spectators)
+
+scenarios:
+  - id: saas_enterprise
+    description: SaaS software license negotiation, seller vs enterprise buyer
+  - id: hiring_package
+    description: Job offer compensation negotiation
+  - id: acquisition_term_sheet
+    description: Startup acquisition valuation negotiation
+
+personas:
+  - id: shark
+    style: Aggressive anchoring, high bluff rate
+  - id: diplomat
+    style: Collaborative, seeks mutual gain
+  - id: veteran
+    style: Patient, reads opponent carefully
+
+hidden_information:
+  - budget_ceiling (opponent's true max budget)
+  - walk_away_price (opponent's true BATNA)
+  - urgency_score (0-1, how time-pressured opponent is)
+  - has_alternative (whether opponent has a competing offer)
+
+rubric:
+  - criterion: Novel environment
+    description: Negotiation as MDP with hidden info, dynamic ZOPA, ToM beliefs
+  - criterion: Reward design
+    description: Multi-term dense reward with bluff detection, ToM accuracy, and drift adaptation
+  - criterion: Training story
+    description: Gemini self-play data → SFT cold start → GRPO fine-tune → reward improvement vs baseline
+  - criterion: Demo quality
+    description: Live browser play + spectator god-view with Three.js avatars
+  - criterion: Hosted Space
+    description: HuggingFace Space with Docker deployment

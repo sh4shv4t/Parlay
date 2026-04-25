@@ -49,12 +49,18 @@ SCENARIOS: dict[str, Scenario] = {
         title="Senior Engineer Offer",
         description="Total comp negotiation: base + equity + signing bonus.",
         anchor_seller=240_000, anchor_buyer=180_000,
-        batna_seller=195_000, batna_buyer=230_000,
-        zopa=(195_000, 230_000), currency="USD", unit="total annual comp",
+        # Widened 15% to improve deal rate in self-play data generation
+        batna_seller=195_000, batna_buyer=264_500,
+        zopa=(195_000, 264_500), currency="USD", unit="total annual comp",
         difficulty=2,
         drift_events=[
-            DriftEvent(trigger_turn=5, event="Competing offer received",
-                       effect_on_urgency=-0.25, effect_on_has_alternative=True),
+            # Delayed from 5 to 8 - early drift was destabilizing pre-anchor phase
+            DriftEvent(
+                trigger_turn=8,
+                event="Competing offer received",
+                effect_on_urgency=-0.25,
+                effect_on_has_alternative=True,
+            ),
         ],
     ),
     "acquisition_term_sheet": Scenario(
