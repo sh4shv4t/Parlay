@@ -20,6 +20,30 @@ def _clean_json(text: str) -> str:
     return re.sub(r"```(?:json)?|```", "", text).strip()
 
 
+def _kw_first(v, default=0.0) -> "float | str":
+    """TRL GRPO may pass a scalar or a 1-item list of dataset fields; normalize for reward math."""
+    if v is None:
+        return default
+    if isinstance(v, (list, tuple)):
+        v = v[0] if len(v) else default
+    return v
+
+
+def _kw_float(v, default: float = 0.0) -> float:
+    v = _kw_first(v, default)
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _kw_str(v, default: str = "") -> str:
+    v = _kw_first(v, default)
+    if v is None or (isinstance(v, str) and v.strip() == ""):
+        return str(default)
+    return str(v)
+
+
 def negotiation_efficiency_reward(completions: list[str], **kwargs) -> list[float]:
     """
     Primary reward: fraction of ZOPA captured by the AI agent.
@@ -39,10 +63,10 @@ def negotiation_efficiency_reward(completions: list[str], **kwargs) -> list[floa
         List of float rewards, same length as completions.
     """
     rewards = []
-    batna_seller = float(kwargs.get("batna_seller", 0))
-    batna_buyer  = float(kwargs.get("batna_buyer", batna_seller))
-    zopa_width   = float(kwargs.get("zopa_width", 1))
-    scenario_id  = str(kwargs.get("scenario_id", ""))
+    batna_seller = _kw_float(kwargs.get("batna_seller", 0), 0.0)
+    batna_buyer = _kw_float(kwargs.get("batna_buyer", batna_seller), batna_seller)
+    zopa_width = _kw_float(kwargs.get("zopa_width", 1), 1.0)
+    scenario_id = _kw_str(kwargs.get("scenario_id", ""), "")
     is_buyer_ai  = scenario_id in _BUYER_AI_SCENARIOS
 
     if zopa_width <= 0:
@@ -84,7 +108,7 @@ def tom_accuracy_reward(completions: list[str], **kwargs) -> list[float]:
     Returns:
         List of float rewards in [0, 7.5].
     """
-    persona = str(kwargs.get("persona", ""))
+    persona = _kw_str(kwargs.get("persona", ""), "")
     tom_signals: dict[str, list[str]] = {
         "shark":    ["deadline", "competitor", "alternative", "pressure", "offer expires"],
         "diplomat": ["relationship", "partnership", "mutual", "together", "trust"],
@@ -118,9 +142,9 @@ def anti_capitulation_reward(completions: list[str], **kwargs) -> list[float]:
     Returns:
         List of float rewards: -OMEGA or 0.
     """
-    batna_seller = float(kwargs.get("batna_seller", 0.0))
-    batna_buyer  = float(kwargs.get("batna_buyer", float("inf")))
-    scenario_id  = str(kwargs.get("scenario_id", ""))
+    batna_seller = _kw_float(kwargs.get("batna_seller", 0.0), 0.0)
+    batna_buyer = _kw_float(kwargs.get("batna_buyer", float("inf")), float("inf"))
+    scenario_id = _kw_str(kwargs.get("scenario_id", ""), "")
     is_buyer_ai  = scenario_id in _BUYER_AI_SCENARIOS
 
     rewards = []
