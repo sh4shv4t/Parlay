@@ -3,6 +3,7 @@ Run before grpo_train.py for SFT→GRPO pipeline. Pass checkpoint path as
 BASE_MODEL env var to grpo_train.py.
 """
 import argparse
+import inspect
 import json
 import logging
 from pathlib import Path
@@ -11,6 +12,18 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 DEFAULT_OUTPUT = "checkpoints/sft_1.5b/"
+
+
+def _sft_seq_len_kw(max_tokens: int = 2048) -> dict[str, int]:
+    """TRL 1.0+ uses max_length; older TRL used max_seq_length on SFTConfig."""
+    from trl import SFTConfig
+
+    p = set(inspect.signature(SFTConfig.__init__).parameters)
+    if "max_length" in p:
+        return {"max_length": max_tokens}
+    if "max_seq_length" in p:
+        return {"max_seq_length": max_tokens}
+    return {}
 
 
 def _extract_completions(rec: dict) -> list[str]:
@@ -134,7 +147,7 @@ def train_sft(
         save_strategy="epoch",
         fp16=True,
         report_to="none",
-        max_length=2048,
+        **_sft_seq_len_kw(2048),
     )
 
     if not torch.cuda.is_available():
