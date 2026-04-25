@@ -5,9 +5,11 @@ All errors return SYNTHETIC_RESPONSE.
 When GOOGLE_API_KEY is absent, MOCK_RESPONSES are returned so the full game
 loop works without any API key.
 
-Primary model for API calls (dashboard, MCP, data generation, ToM):
-- GEMINI_MODEL — gemini-2.5-flash-lite for bulk/self-play and live callers
-  that pass this id via MODEL_ID_DEMO / MODEL_ID_DATA aliases.
+Model routing:
+- MODEL_ID_DATA (gemini-2.5-flash-lite) — data generation, self-play, ToM inference.
+  Low-latency, high-throughput; used by runner.py and generate_data.py.
+- MODEL_ID_DEMO (gemini-2.5-flash) — web UI, dashboard API, MCP tools.
+  Higher quality responses for live user interaction.
 """
 import asyncio
 import json
@@ -54,15 +56,21 @@ SCENARIO_ROLE_CONTEXT: dict[str, dict[str, str]] = {
     },
 }
 
-GEMINI_MODEL = "gemini-2.5-flash-lite"
-# Aliases for imports (dashboard, MCP, training all use flash-lite)
-MODEL_ID_DEMO = GEMINI_MODEL
-MODEL_ID_DATA = GEMINI_MODEL
-MODEL_ID = GEMINI_MODEL
+GEMINI_MODEL  = "gemini-2.5-flash-lite"   # kept for backward compat; equals MODEL_ID_DATA
+MODEL_ID_DATA = "gemini-2.5-flash-lite"   # data generation, self-play, ToM inference
+MODEL_ID_DEMO = "gemini-2.5-flash"        # web UI, dashboard API, MCP tools
+MODEL_ID      = MODEL_ID_DATA             # stable alias (runner.py omits model= → flash-lite)
 
 _client = None
 _mock_warned: bool = False
 _gemini_model_logged: bool = False
+_quiet: bool = False   # suppresses per-call [Gemini LIVE] prints when True
+
+
+def set_quiet(flag: bool) -> None:
+    """Suppress [Gemini LIVE] per-call stderr prints (e.g. during test runs)."""
+    global _quiet
+    _quiet = flag
 
 # ── Mock responses (keyless dev / CI) ────────────────────────────────────────
 # Offer amounts are realistic for the default SaaS enterprise scenario
@@ -336,10 +344,11 @@ async def call_gemini(
 
             _turn_count += 1
             _live_calls += 1
-            print(
-                f"[Gemini LIVE] model={mid} chars={len(response.text or '')} turn={_turn_count}",
-                file=sys.stderr,
-            )
+            if not _quiet:
+                print(
+                    f"[Gemini LIVE] model={mid} chars={len(response.text or '')} turn={_turn_count}",
+                    file=sys.stderr,
+                )
 
             text = (response.text or "").strip()
             text = text.replace("```json", "").replace("```", "").strip()

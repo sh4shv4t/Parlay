@@ -253,8 +253,16 @@ def _apply_drift(session: dict[str, Any]) -> Optional[str]:
         if event.trigger_turn == state.step_count:
             session["drift_turn"] = state.step_count
             state.drift_events_fired += 1
-            session["tom_tracker"].drift_event(event.effect_on_urgency, event.effect_on_has_alternative)
+            session["tom_tracker"].drift_event(
+                event.effect_on_urgency,
+                event.effect_on_has_alternative,
+                event_description=event.event,
+            )
             state.belief_history = list(session["tom_tracker"].history)
+            logger.info(
+                "Drift event fired: scenario=%s turn=%d event=%r urgency_delta=%+.2f",
+                state.scenario_id, state.step_count, event.event, event.effect_on_urgency,
+            )
             return event.event
     return None
 
@@ -443,10 +451,16 @@ async def make_move(req: MoveRequest) -> dict:
     )
 
     if session["drift_turn"] is not None and not session["drift_adapted"]:
-        if turn <= session["drift_turn"] + 2 and any(
-            signal in req.message.lower() for signal in ["understand", "noted", "given", "considering", "account"]
-        ):
+        adaptation_signals = ["understand", "noted", "given", "considering", "account"]
+        matched_signal = next(
+            (s for s in adaptation_signals if s in req.message.lower()), None
+        )
+        if turn <= session["drift_turn"] + 2 and matched_signal:
             session["drift_adapted"] = True
+            logger.info(
+                "drift_adapted=True session=%s turn=%d matched_phrase=%r snippet=%r",
+                req.session_id, turn + 1, matched_signal, req.message[:80],
+            )
 
     new_history = list(state.offer_history)
     if req.amount is not None:

@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
 
-from agent.gemini_client import get_and_reset_counts
+from agent.gemini_client import get_and_reset_counts, set_quiet
 from agent.runner import EpisodeResult, run_episode
 from game.scenarios import SCENARIOS
 from parlay_env.models import PersonaType
@@ -223,7 +223,7 @@ def _print_inspect_report(
 
 
 async def run_inspect_mode(args) -> None:
-    out_path = Path("training/data/inspect_run.jsonl")
+    out_path = Path(getattr(args, "inspect_output", "data/inspect_run.jsonl"))
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     coverage: dict[tuple[str, str], int] = defaultdict(int)
@@ -320,6 +320,7 @@ async def run_diversity_pass(args, output_path: Path) -> None:
     min_per_combo = max(2, args.episodes // len(REQUIRED_COMBINATIONS))
     total_live_calls: int = 0
     total_fallback_calls: int = 0
+    _verbose = not getattr(args, "quiet", False)
 
     with open(output_path, "w", encoding="utf-8") as out_f:
         while len(kept_records) < args.episodes:
@@ -348,16 +349,17 @@ async def run_diversity_pass(args, output_path: Path) -> None:
                     _live_d, _fall_d = get_and_reset_counts()
                     total_live_calls += _live_d
                     total_fallback_calls += _fall_d
-                    print(
-                        f"[EP --/{args.episodes:02d}] "
-                        f"{persona}×{scenario_id:<27s} | "
-                        f"reward={record.get('reward', 0.0):+.2f} | "
-                        f"eff={record.get('deal_efficiency', 0.0):.3f} | "
-                        f"kept=NO  | "
-                        f"total_kept={len(kept_records)}/{generated} | "
-                        f"gemini_live={_live_d} fallback={_fall_d}",
-                        file=sys.stderr,
-                    )
+                    if _verbose:
+                        print(
+                            f"[EP --/{args.episodes:02d}] "
+                            f"{persona}×{scenario_id:<27s} | "
+                            f"reward={record.get('reward', 0.0):+.2f} | "
+                            f"eff={record.get('deal_efficiency', 0.0):.3f} | "
+                            f"kept=NO  | "
+                            f"total_kept={len(kept_records)}/{generated} | "
+                            f"gemini_live={_live_d} fallback={_fall_d}",
+                            file=sys.stderr,
+                        )
                     continue
 
                 out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -366,63 +368,7 @@ async def run_diversity_pass(args, output_path: Path) -> None:
                 total_live_calls += _live
                 total_fallback_calls += _fall
                 _ep_num = len(kept_records)
-                _reward = record.get("reward", 0.0)
-                _eff = record.get("deal_efficiency", 0.0)
-                _combo = f"{record['persona']}×{record['scenario_id']}"
-                print(
-                    f"[EP {_ep_num:02d}/{args.episodes:02d}] "
-                    f"{_combo:<35s} | "
-                    f"reward={_reward:+.2f} | "
-                    f"eff={_eff:.3f} | "
-                    f"kept=YES | "
-                    f"total_kept={_ep_num}/{generated} | "
-                    f"gemini_live={_live} fallback={_fall}",
-                    file=sys.stderr,
-                )
-                if _ep_num in (20, 40, 60):
-                    _all_rewards = [r.get("reward", 0.0) for r in kept_records]
-                    _all_eff = [r.get("deal_efficiency", 0.0) for r in kept_records]
-                    _combos_covered = len({(r["persona"], r["scenario_id"]) for r in kept_records})
-                    print(f"\n{'━' * 40}", file=sys.stderr)
-                    print(f"[CHECKPOINT {_ep_num}/{args.episodes}]", file=sys.stderr)
-                    print(
-                        f"  Kept so far     : {_ep_num}/{generated}  ({100 * _ep_num / max(generated, 1):.1f}%)",
-                        file=sys.stderr,
-                    )
-                    print(f"  Mean reward     : {statistics.mean(_all_rewards):.2f}", file=sys.stderr)
-                    print(f"  Mean efficiency : {statistics.mean(_all_eff):.3f}", file=sys.stderr)
-                    print(f"  Combos covered  : {_combos_covered}/9", file=sys.stderr)
-                    print(f"  Live calls total: {total_live_calls}", file=sys.stderr)
-                    print(f"  Fallback total  : {total_fallback_calls}", file=sys.stderr)
-                    print(f"{'━' * 40}\n", file=sys.stderr)
-                coverage[(persona, scenario_id)] += 1
-                kept_reason_counts[reason] += 1
-                progress_made = True
-
-            if len(kept_records) >= args.episodes:
-                break
-
-            if not progress_made:
-                persona, scenario_id = random.choice(REQUIRED_COMBINATIONS)
-                record = await _run_one(persona, scenario_id, seed=seed, max_turns=args.max_turns)
-                seed += 1
-                generated += 1
-                if record is None:
-                    _live_n, _fall_n = get_and_reset_counts()
-                    total_live_calls += _live_n
-                    total_fallback_calls += _fall_n
-                    continue
-                keep, reason = is_quality_episode(
-                    _grade_proxy_from_record(record),
-                    args,
-                )
-                if keep:
-                    out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
-                    kept_records.append(record)
-                    _live, _fall = get_and_reset_counts()
-                    total_live_calls += _live
-                    total_fallback_calls += _fall
-                    _ep_num = len(kept_records)
+                if _verbose:
                     _reward = record.get("reward", 0.0)
                     _eff = record.get("deal_efficiency", 0.0)
                     _combo = f"{record['persona']}×{record['scenario_id']}"
@@ -452,6 +398,64 @@ async def run_diversity_pass(args, output_path: Path) -> None:
                         print(f"  Live calls total: {total_live_calls}", file=sys.stderr)
                         print(f"  Fallback total  : {total_fallback_calls}", file=sys.stderr)
                         print(f"{'━' * 40}\n", file=sys.stderr)
+                coverage[(persona, scenario_id)] += 1
+                kept_reason_counts[reason] += 1
+                progress_made = True
+
+            if len(kept_records) >= args.episodes:
+                break
+
+            if not progress_made:
+                persona, scenario_id = random.choice(REQUIRED_COMBINATIONS)
+                record = await _run_one(persona, scenario_id, seed=seed, max_turns=args.max_turns)
+                seed += 1
+                generated += 1
+                if record is None:
+                    _live_n, _fall_n = get_and_reset_counts()
+                    total_live_calls += _live_n
+                    total_fallback_calls += _fall_n
+                    continue
+                keep, reason = is_quality_episode(
+                    _grade_proxy_from_record(record),
+                    args,
+                )
+                if keep:
+                    out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    kept_records.append(record)
+                    _live, _fall = get_and_reset_counts()
+                    total_live_calls += _live
+                    total_fallback_calls += _fall
+                    _ep_num = len(kept_records)
+                    if _verbose:
+                        _reward = record.get("reward", 0.0)
+                        _eff = record.get("deal_efficiency", 0.0)
+                        _combo = f"{record['persona']}×{record['scenario_id']}"
+                        print(
+                            f"[EP {_ep_num:02d}/{args.episodes:02d}] "
+                            f"{_combo:<35s} | "
+                            f"reward={_reward:+.2f} | "
+                            f"eff={_eff:.3f} | "
+                            f"kept=YES | "
+                            f"total_kept={_ep_num}/{generated} | "
+                            f"gemini_live={_live} fallback={_fall}",
+                            file=sys.stderr,
+                        )
+                        if _ep_num in (20, 40, 60):
+                            _all_rewards = [r.get("reward", 0.0) for r in kept_records]
+                            _all_eff = [r.get("deal_efficiency", 0.0) for r in kept_records]
+                            _combos_covered = len({(r["persona"], r["scenario_id"]) for r in kept_records})
+                            print(f"\n{'━' * 40}", file=sys.stderr)
+                            print(f"[CHECKPOINT {_ep_num}/{args.episodes}]", file=sys.stderr)
+                            print(
+                                f"  Kept so far     : {_ep_num}/{generated}  ({100 * _ep_num / max(generated, 1):.1f}%)",
+                                file=sys.stderr,
+                            )
+                            print(f"  Mean reward     : {statistics.mean(_all_rewards):.2f}", file=sys.stderr)
+                            print(f"  Mean efficiency : {statistics.mean(_all_eff):.3f}", file=sys.stderr)
+                            print(f"  Combos covered  : {_combos_covered}/9", file=sys.stderr)
+                            print(f"  Live calls total: {total_live_calls}", file=sys.stderr)
+                            print(f"  Fallback total  : {total_fallback_calls}", file=sys.stderr)
+                            print(f"{'━' * 40}\n", file=sys.stderr)
                     coverage[(persona, scenario_id)] += 1
                     kept_reason_counts[reason] += 1
                 else:
@@ -459,16 +463,17 @@ async def run_diversity_pass(args, output_path: Path) -> None:
                     _live_d, _fall_d = get_and_reset_counts()
                     total_live_calls += _live_d
                     total_fallback_calls += _fall_d
-                    print(
-                        f"[EP --/{args.episodes:02d}] "
-                        f"{persona}×{scenario_id:<27s} | "
-                        f"reward={record.get('reward', 0.0):+.2f} | "
-                        f"eff={record.get('deal_efficiency', 0.0):.3f} | "
-                        f"kept=NO  | "
-                        f"total_kept={len(kept_records)}/{generated} | "
-                        f"gemini_live={_live_d} fallback={_fall_d}",
-                        file=sys.stderr,
-                    )
+                    if _verbose:
+                        print(
+                            f"[EP --/{args.episodes:02d}] "
+                            f"{persona}×{scenario_id:<27s} | "
+                            f"reward={record.get('reward', 0.0):+.2f} | "
+                            f"eff={record.get('deal_efficiency', 0.0):.3f} | "
+                            f"kept=NO  | "
+                            f"total_kept={len(kept_records)}/{generated} | "
+                            f"gemini_live={_live_d} fallback={_fall_d}",
+                            file=sys.stderr,
+                        )
 
     discard_pct = (discarded / max(generated, 1)) * 100.0
     print(
@@ -514,7 +519,19 @@ def main() -> None:
     parser.add_argument(
         "--inspect",
         action="store_true",
-        help="Run a fixed 60-episode quality diagnostic; writes training/data/inspect_run.jsonl",
+        help="Run a fixed 60-episode quality diagnostic; writes data/inspect_run.jsonl",
+    )
+    parser.add_argument(
+        "--inspect-output",
+        type=str,
+        default="data/inspect_run.jsonl",
+        dest="inspect_output",
+        help="Output path for --inspect mode (default: data/inspect_run.jsonl)",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress per-episode and per-call stderr output (final summary always shown)",
     )
     args = parser.parse_args()
 
@@ -523,6 +540,10 @@ def main() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("google_genai").setLevel(logging.WARNING)
     logging.getLogger("google_genai.models").setLevel(logging.WARNING)
+
+    if args.quiet:
+        set_quiet(True)
+        logging.disable(logging.WARNING)
 
     if args.google_api_key:
         os.environ["GOOGLE_API_KEY"] = args.google_api_key

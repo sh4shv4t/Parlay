@@ -149,7 +149,9 @@ def train_grpo(
         max_steps=steps,
     )
 
-    trainer = GRPOTrainer(
+    from .grpo_env_wrapper import ParlayGRPOEnvWrapper
+
+    _trainer = GRPOTrainer(
         model=sft_model_path,
         reward_funcs=[
             negotiation_efficiency_reward,
@@ -162,6 +164,7 @@ def train_grpo(
         train_dataset=dataset,
         peft_config=lora_config,
     )
+    trainer = ParlayGRPOEnvWrapper(_trainer)
 
     logger.info(
         f"Starting GRPO training: model={sft_model_path}, "

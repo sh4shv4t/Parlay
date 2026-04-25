@@ -42,6 +42,27 @@ class EpisodeGrade:
     bluffs_caught: int
     termination_reason: Optional[str]
     drift_adapted: bool
+    tom_brier_urgency: float = 0.0   # Brier score for urgency beliefs (lower = better)
+    tom_brier_alt: float = 0.0       # Brier score for has_alternative beliefs
+
+
+def _brier_scores(beliefs: list[BeliefState], hidden: HiddenState) -> tuple[float, float]:
+    """
+    Compute Brier scores for urgency and has_alternative over all belief snapshots.
+
+    Brier score = (1/N) Σ (predicted - actual)²; lower is better, 0 = perfect.
+
+    Returns:
+        (brier_urgency, brier_alt) both in [0, 1].
+    """
+    if not beliefs:
+        return 1.0, 1.0
+    actual_urgency = hidden.urgency_score
+    actual_alt = float(hidden.has_alternative)
+    n = len(beliefs)
+    brier_urgency = sum((b.est_urgency - actual_urgency) ** 2 for b in beliefs) / n
+    brier_alt = sum((float(b.est_has_alternative) - actual_alt) ** 2 for b in beliefs) / n
+    return round(brier_urgency, 6), round(brier_alt, 6)
 
 
 def _tom_accuracy(belief: BeliefState, hidden: HiddenState) -> float:
@@ -208,6 +229,7 @@ def grade_episode(
 
     tom_scores = [_tom_accuracy(belief, session.hidden_state) for belief in session.belief_history]
     tom_accuracy_avg = sum(tom_scores) / len(tom_scores) if tom_scores else 0.0
+    brier_urgency, brier_alt = _brier_scores(session.belief_history, session.hidden_state)
     terminal = compute_terminal_reward(session, final_price, t_close, t_max, drift_adapted)
 
     return EpisodeGrade(
@@ -217,4 +239,6 @@ def grade_episode(
         bluffs_caught=session.bluffs_caught if bluffs_caught is None else bluffs_caught,
         termination_reason=session.termination_reason,
         drift_adapted=drift_adapted,
+        tom_brier_urgency=brier_urgency,
+        tom_brier_alt=brier_alt,
     )

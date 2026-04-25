@@ -10,6 +10,10 @@ from parlay_env.reward import GAMMA, OMEGA
 
 logger = logging.getLogger(__name__)
 
+# Scenarios where the AI plays as a BUYER (pushes offers DOWN).
+# For these, ZOPA efficiency is measured from the buyer's side.
+_BUYER_AI_SCENARIOS = frozenset({"hiring_package", "acquisition_term_sheet"})
+
 
 def _clean_json(text: str) -> str:
     """Strip markdown code fences and surrounding whitespace."""
@@ -18,22 +22,29 @@ def _clean_json(text: str) -> str:
 
 def negotiation_efficiency_reward(completions: list[str], **kwargs) -> list[float]:
     """
-    Primary reward: fraction of ZOPA captured.
+    Primary reward: fraction of ZOPA captured by the AI agent.
 
-    Parses offer_amount from each completion JSON.
-    E = (offer - batna_seller) / zopa_width  ∈ [0, 1]
+    For seller-AI scenarios (saas_enterprise):
+        E = (offer - batna_seller) / zopa_width  ∈ [0, 1]
+    For buyer-AI scenarios (hiring_package, acquisition_term_sheet):
+        E = (batna_buyer - offer) / zopa_width   ∈ [0, 1]
     Returns value in [0, GAMMA] = [0, 100].
 
     Args:
         completions: List of G=8 model outputs (JSON strings).
-        **kwargs:    Must contain batna_seller (float) and zopa_width (float).
+        **kwargs:    Must contain batna_seller (float), batna_buyer (float),
+                     zopa_width (float), and optionally scenario_id (str).
 
     Returns:
         List of float rewards, same length as completions.
     """
     rewards = []
-    batna = float(kwargs.get("batna_seller", 0))
-    zopa_width = float(kwargs.get("zopa_width", 1))
+    batna_seller = float(kwargs.get("batna_seller", 0))
+    batna_buyer  = float(kwargs.get("batna_buyer", batna_seller))
+    zopa_width   = float(kwargs.get("zopa_width", 1))
+    scenario_id  = str(kwargs.get("scenario_id", ""))
+    is_buyer_ai  = scenario_id in _BUYER_AI_SCENARIOS
+
     if zopa_width <= 0:
         zopa_width = 1.0
 
@@ -42,7 +53,12 @@ def negotiation_efficiency_reward(completions: list[str], **kwargs) -> list[floa
             data = json.loads(_clean_json(completion))
             offer = float(data.get("offer_amount") or 0)
             if offer > 0:
-                E = max(0.0, min(1.0, (offer - batna) / zopa_width))
+                if is_buyer_ai:
+                    # AI is buyer: lower offers are better; score = (buyer_batna - offer) / width
+                    E = max(0.0, min(1.0, (batna_buyer - offer) / zopa_width))
+                else:
+                    # AI is seller: higher offers are better; score = (offer - seller_batna) / width
+                    E = max(0.0, min(1.0, (offer - batna_seller) / zopa_width))
                 rewards.append(float(E * GAMMA))
             else:
                 rewards.append(0.0)
@@ -59,6 +75,8 @@ def tom_accuracy_reward(completions: list[str], **kwargs) -> list[float]:
     Uses keyword matching against persona-specific signals as a lightweight proxy.
     Full accuracy computed by grader.py; this is used for fast training feedback.
 
+    Signal lists are disjoint across personas (no double-counting).
+
     Args:
         completions: List of G=8 model outputs.
         **kwargs:    Must contain persona (str).
@@ -70,7 +88,8 @@ def tom_accuracy_reward(completions: list[str], **kwargs) -> list[float]:
     tom_signals: dict[str, list[str]] = {
         "shark":    ["deadline", "competitor", "alternative", "pressure", "offer expires"],
         "diplomat": ["relationship", "partnership", "mutual", "together", "trust"],
-        "veteran":  ["experience", "seen this", "long-term", "trust", "patience"],
+        # "trust" removed from veteran to avoid double-counting with diplomat
+        "veteran":  ["experience", "seen this", "long-term", "patience", "seasoned"],
     }
     signals = tom_signals.get(persona.lower(), [])
     rewards = []
@@ -83,35 +102,46 @@ def tom_accuracy_reward(completions: list[str], **kwargs) -> list[float]:
 
 def anti_capitulation_reward(completions: list[str], **kwargs) -> list[float]:
     """
-    Hard penalty if the agent's offer falls below its own BATNA.
+    Hard penalty if the agent's offer crosses its own BATNA floor.
 
-    The agent plays as the SELLER. The seller's own walk-away price is
-    batna_seller — the minimum price the agent will accept. Any offer
-    below batna_seller means the agent is capitulating below its floor.
+    For seller-AI: offer < batna_seller is capitulation.
+    For buyer-AI:  offer > batna_buyer  is capitulation (paying too much).
 
     Returns -OMEGA (= -200) for capitulation, 0 otherwise.
-    This is a hard cliff — no smoothing.
+    Parse errors are logged and treated as 0 (no false penalty for malformed output).
 
     Args:
         completions: List of G=8 model outputs.
-        **kwargs:    Must contain batna_seller (float) — the seller-agent's
-                     own walk-away price (minimum acceptable price).
+        **kwargs:    Must contain batna_seller (float).
+                     Optionally batna_buyer (float) and scenario_id (str).
 
     Returns:
         List of float rewards: -OMEGA or 0.
     """
-    batna_self = float(kwargs.get("batna_seller", 0.0))
+    batna_seller = float(kwargs.get("batna_seller", 0.0))
+    batna_buyer  = float(kwargs.get("batna_buyer", float("inf")))
+    scenario_id  = str(kwargs.get("scenario_id", ""))
+    is_buyer_ai  = scenario_id in _BUYER_AI_SCENARIOS
+
     rewards = []
     for completion in completions:
         try:
             data = json.loads(_clean_json(completion))
             offer = float(data.get("offer_amount") or float("inf"))
-            if offer < batna_self:
+            if is_buyer_ai:
+                capitulated = offer > batna_buyer
+            else:
+                capitulated = offer < batna_seller
+            if capitulated:
                 rewards.append(-float(OMEGA))
-                logger.debug(f"Capitulation detected: offer={offer} < batna={batna_self}")
+                logger.debug(
+                    f"Capitulation: offer={offer} {'>' if is_buyer_ai else '<'} "
+                    f"batna={'buyer=' + str(batna_buyer) if is_buyer_ai else 'seller=' + str(batna_seller)}"
+                )
             else:
                 rewards.append(0.0)
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning(f"anti_capitulation_reward parse error (treated as 0): {exc}")
             rewards.append(0.0)
     return rewards
 

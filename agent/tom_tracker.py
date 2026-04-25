@@ -129,6 +129,7 @@ class ToMTracker:
         self,
         effect_on_urgency: float,
         effect_on_has_alternative: bool,
+        event_description: str = "",
     ) -> BeliefState:
         """
         Apply a drift event to beliefs.
@@ -136,6 +137,8 @@ class ToMTracker:
         Args:
             effect_on_urgency:         Signed delta to urgency estimate.
             effect_on_has_alternative: Override for has_alternative belief.
+            event_description:         Human-readable scenario event string
+                                       (e.g. "Competitor drops price 15%").
 
         Returns:
             Updated BeliefState post-drift.
@@ -150,11 +153,48 @@ class ToMTracker:
             confidence=max(0.0, last.confidence - 0.15),  # drift reduces confidence
         )
         self.history.append(updated)
+        desc_part = f" | event={event_description!r}" if event_description else ""
         logger.info(
-            f"ToM drift applied: urgency={new_urgency:.2f}, "
+            f"ToM drift applied{desc_part}: "
+            f"urgency_delta={effect_on_urgency:+.2f} → {new_urgency:.2f}, "
             f"alt={effect_on_has_alternative}"
         )
         return updated
+
+    def brier_scores(self, hidden: HiddenState) -> dict[str, float]:
+        """
+        Compute per-field Brier scores over the full belief history.
+
+        Brier score = (1/N) Σ (predicted - actual)²
+        Lower is better; 0 = perfect.
+
+        Fields scored:
+          - urgency:      est_urgency (continuous 0–1) vs hidden.urgency_score
+          - has_alt:      est_has_alternative (0/1 probability) vs hidden.has_alternative
+
+        Args:
+            hidden: The true hidden state revealed at episode end.
+
+        Returns:
+            Dict with keys "urgency" and "has_alt", each a float in [0, 1].
+        """
+        if not self.history:
+            return {"urgency": 1.0, "has_alt": 1.0}
+
+        actual_urgency = hidden.urgency_score
+        actual_alt = float(hidden.has_alternative)
+
+        urgency_sq_err = sum(
+            (b.est_urgency - actual_urgency) ** 2 for b in self.history
+        )
+        alt_sq_err = sum(
+            (float(b.est_has_alternative) - actual_alt) ** 2 for b in self.history
+        )
+        n = len(self.history)
+        return {
+            "urgency": round(urgency_sq_err / n, 6),
+            "has_alt": round(alt_sq_err / n, 6),
+        }
 
     def accuracy_against(self, hidden: HiddenState) -> float:
         """

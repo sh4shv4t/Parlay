@@ -80,15 +80,6 @@ async def serve_index() -> FileResponse:
     )
 
 
-@app.get("/train", include_in_schema=False)
-async def serve_train() -> FileResponse:
-    """Serve the training dashboard."""
-    return FileResponse(
-        "dashboard/train.html",
-        headers={"Cache-Control": "no-cache, must-revalidate"},
-    )
-
-
 @app.get("/spectate", include_in_schema=False)
 async def serve_spectate() -> FileResponse:
     """Serve the spectator dashboard."""

@@ -131,8 +131,12 @@ async def run_episode(
         for event in scenario.drift_events:
             if event.trigger_turn == turn or (forced_drift_turn == turn):
                 drift_turn = turn
-                tom.drift_event(event.effect_on_urgency, event.effect_on_has_alternative)
-                logger.info(f"Drift event at turn {turn}: {event.event}")
+                tom.drift_event(
+                    event.effect_on_urgency,
+                    event.effect_on_has_alternative,
+                    event_description=event.event,
+                )
+                logger.info(f"Drift event at turn {turn}: {event.event!r}")
                 break
 
         if inject_noise and turn < 3 and rng.random() < 0.3:
@@ -211,8 +215,16 @@ async def run_episode(
 
         if drift_turn is not None and not drift_adapted and turn <= drift_turn + 2:
             adaptation_signals = ["understand", "noted", "given that", "considering"]
-            if any(s in action.utterance.lower() for s in adaptation_signals):
+            matched = next(
+                (s for s in adaptation_signals if s in action.utterance.lower()), None
+            )
+            if matched:
                 drift_adapted = True
+                logger.info(
+                    f"drift_adapted=True at turn={turn} "
+                    f"matched_phrase={matched!r} "
+                    f"utterance_snippet={action.utterance[:80]!r}"
+                )
 
         new_offers = list(state.offer_history)
         if action.offer_amount:
