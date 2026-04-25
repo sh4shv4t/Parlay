@@ -255,6 +255,6 @@ The human-as-teacher flywheel is inspired by RLHF's core insight: human preferen
 
 ---
 
-*Code: [github.com/YOUR_USERNAME/parlay](https://github.com/sh4shv4t/parlay) · Space: [huggingface.co/spaces/YOUR_USERNAME/parlay](https://huggingface.co/spaces/sh4shv4t/parlay)*
+*Code: [github.com/sh4shv4t/parlay](https://github.com/sh4shv4t/parlay) · Space: [huggingface.co/spaces/sh4shv4tE/parlay](https://huggingface.co/spaces/sh4shv4t/parlay)*
 
 *— Shashvat Singh*
