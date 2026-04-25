@@ -173,6 +173,7 @@ def train_grpo(
 
 
 def main() -> None:
+    global GRPO_GENERATIONS
     parser = argparse.ArgumentParser(description="Parlay GRPO fine-tuning")
     parser.add_argument("--model", default="models/parlay-sft")
     parser.add_argument("--base_model", default="")
@@ -185,7 +186,6 @@ def main() -> None:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    global GRPO_GENERATIONS
     GRPO_GENERATIONS = args.g
     model_path = args.base_model or args.model
     train_grpo(model_path, args.data, args.output, args.steps)

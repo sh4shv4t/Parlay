@@ -292,10 +292,10 @@ async def call_gemini(
         Parsed dict with keys: utterance (str), offer_amount (float|None),
         tactical_move (str|None). Returns SYNTHETIC_RESPONSE on any error.
     """
+    global _gemini_model_logged, _live_calls, _turn_count, _fallback_calls
     if _is_mock_mode():
         return _get_mock_response(persona, len(messages), scenario_id)
 
-    global _gemini_model_logged
     if not _gemini_model_logged:
         logger.info(f"[Gemini] Using model: {GEMINI_MODEL}")
         _gemini_model_logged = True
@@ -334,7 +334,6 @@ async def call_gemini(
         try:
             response = await loop.run_in_executor(None, _call)
 
-            global _live_calls, _turn_count
             _turn_count += 1
             _live_calls += 1
             print(
@@ -372,7 +371,6 @@ async def call_gemini(
         file=sys.stderr,
     )
     logger.warning("Gemini API / parse failed after retries — using text fallback")
-    global _fallback_calls
     _fallback_calls += 1
     if text:
         return {**SYNTHETIC_RESPONSE, "utterance": text[:300]}
