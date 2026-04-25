@@ -99,6 +99,32 @@ def _get_zopa_width(scenario_id: str) -> float:
     return max(1.0, buyer - seller)
 
 
+def _per_device_and_accum_for_grpo_g(num_g: int) -> tuple[int, int]:
+    """
+    TRL GRPO: generation_batch_size (defaults to per_device * grad_accum on 1 GPU) must
+    be divisible by num_generations. Pick a reasonable (per_device, accum) pair.
+    """
+    g = max(1, int(num_g))
+    for pd, acc in (
+        (2, 8),
+        (1, 8),
+        (2, 6),
+        (2, 12),
+        (1, 12),
+        (3, 4),
+        (2, 4),
+        (4, 4),
+        (1, 6),
+        (1, 16),
+        (2, 16),
+    ):
+        if (pd * acc) % g == 0:
+            return (pd, acc)
+    if g <= 32:
+        return (1, g)
+    return (1, ((g + 7) // 8) * 8)  # rare: align accum to multiple of 8
+
+
 def train_grpo(
     sft_model_path: str,
     data_path: str,
@@ -155,11 +181,20 @@ def train_grpo(
         task_type="CAUSAL_LM",
     )
 
+    per_dev, grad_acc = _per_device_and_accum_for_grpo_g(GRPO_GENERATIONS)
+    logger.info(
+        "GRPO batch: per_device_train_batch_size=%d gradient_accumulation_steps=%d (product=%d, G=%d)",
+        per_dev,
+        grad_acc,
+        per_dev * grad_acc,
+        GRPO_GENERATIONS,
+    )
+
     training_args = GRPOConfig(
         output_dir=output_dir,
         num_train_epochs=1,
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=8,
+        per_device_train_batch_size=per_dev,
+        gradient_accumulation_steps=grad_acc,
         learning_rate=5e-7,
         num_generations=GRPO_GENERATIONS,
         max_completion_length=256,
