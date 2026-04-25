@@ -130,6 +130,57 @@ def _per_device_and_accum_for_grpo_g(num_g: int) -> tuple[int, int]:
     return (1, ((g + 7) // 8) * 8)  # rare: align accum to multiple of 8
 
 
+def _is_peft_adapter_location(sft: str) -> bool:
+    """True if this path or hub repo is an SFT/LoRA output (adapter_config.json), not a merged full model."""
+    p = Path(sft)
+    if p.is_dir() and (p / "adapter_config.json").is_file():
+        return True
+    if p.exists():
+        return False
+    try:
+        from huggingface_hub import hf_hub_download
+
+        hf_hub_download(repo_id=sft, filename="adapter_config.json")
+        return True
+    except Exception:
+        return False
+
+
+def _load_peft_policy_from_sft(sft: str) -> "object":
+    """
+    SFTTrainer saves a LoRA adapter; GRPO/Transformers need base + PEFT, not a bare adapter folder.
+    """
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM
+    import torch
+
+    p = Path(sft)
+    if p.is_dir() and (p / "adapter_config.json").is_file():
+        cfg_path = p / "adapter_config.json"
+    else:
+        from huggingface_hub import hf_hub_download
+
+        cfg_path = Path(hf_hub_download(repo_id=sft, filename="adapter_config.json"))
+
+    with open(cfg_path, encoding="utf-8") as f:
+        ac = json.load(f)
+    base = str(
+        ac.get("base_model_name_or_path")
+        or os.environ.get("BASE_MODEL")
+        or BASE_MODEL
+    )
+    logger.info("Loading SFT LoRA: adapter=%s base=%s", sft, base)
+
+    dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    base_m = AutoModelForCausalLM.from_pretrained(
+        base,
+        torch_dtype=dtype,
+        device_map="auto",
+        trust_remote_code=True,
+    )
+    return PeftModel.from_pretrained(base_m, sft)
+
+
 def train_grpo(
     sft_model_path: str,
     data_path: str,
@@ -227,11 +278,18 @@ def train_grpo(
 
     training_args = GRPOConfig(**grpo_kw)
 
+    if _is_peft_adapter_location(sft_model_path):
+        policy = _load_peft_policy_from_sft(sft_model_path)
+        grpo_peft = None
+    else:
+        policy = sft_model_path
+        grpo_peft = lora_config
+
     from .grpo_env_wrapper import ParlayGRPOEnvWrapper
 
     _tr_sig = set(inspect.signature(GRPOTrainer.__init__).parameters)
     _trainer_kw: dict = {
-        "model": sft_model_path,
+        "model": policy,
         "reward_funcs": [
             negotiation_efficiency_reward,
             tom_accuracy_reward,
@@ -240,7 +298,7 @@ def train_grpo(
         ],
         "args": training_args,
         "train_dataset": dataset,
-        "peft_config": lora_config,
+        "peft_config": grpo_peft,
     }
     if "reward_weights" in _tr_sig and "reward_weights" not in _cfg_sig:
         _trainer_kw["reward_weights"] = REWARD_WEIGHTS
