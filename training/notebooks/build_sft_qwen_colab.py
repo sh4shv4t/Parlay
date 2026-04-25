@@ -38,7 +38,11 @@ episodes using **Supervised Fine-Tuning (SFT)** with LoRA via
 3. Formats to ChatML, trains with LoRA (r=16)
 4. Plots, evaluates before/after, pushes adapter to `sh4shv4t/parlay-negotiator`
 
-**Runtime:** ~25 min on T4 · **Cost:** $0 (free tier).""")
+**Runtime:** ~25 min on T4 · **Cost:** $0 (free tier).
+
+**If `load_dataset` fails on `Feature type 'Json'`:** the install cell upgrades `datasets`;
+if it still fails, use **Runtime → Restart runtime**, then run from Step 2 onward. The
+data cell also falls back to downloading `episodes_v2.jsonl` directly (no `Json` schema).""")
 
 add_md("## Step 1 — Install dependencies")
 
@@ -52,18 +56,39 @@ subprocess.run([
 subprocess.run([
     sys.executable, "-m", "pip", "install",
     "trl>=0.8.6", "peft>=0.10.0", "accelerate>=0.28.0",
-    "datasets>=2.18.0", "huggingface-hub>=0.22.0",
     "bitsandbytes>=0.43.0", "xformers", "--quiet",
 ], check=True)
-print("OK: dependencies")""")
+# Hub dataset uses `Json` features — needs datasets 3.x (Colab ships an older build)
+subprocess.run([
+    sys.executable, "-m", "pip", "install",
+    "-U", "datasets>=3.0.0", "huggingface-hub>=0.23.0", "pyarrow>=14.0.0",
+    "--quiet",
+], check=True)
+import os
+os.environ.setdefault("UNSLOTH_DISABLE_STATISTICS", "1")
+print("OK: dependencies (datasets>=3 for Json dtype on Hub)")""")
 
-add_md("## Step 2 — GPU + config")
+add_md("""## Step 2 — GPU + config
+
+**GPU required** (Unsloth + 4-bit QLoRA will not run on CPU).
+
+In Colab: **Runtime** → **Change runtime type** → **Hardware accelerator** = **T4** (or L4 / A100 / V100) → **Save**, then re-run this cell. Free tier: choose **T4** if offered.
+
+**Unsloth:** we set `UNSLOTH_DISABLE_STATISTICS=1` below so Colab does not hang 120s on Unsloth’s Hugging Face “statistics” fetch (often mis-reported as “HF is down”).""")
 
 add_code("""import os, json
 import torch
 from google.colab import userdata
 
-assert torch.cuda.is_available(), "Use Runtime → Change runtime type → T4 GPU"
+# Before any `import unsloth` in later cells — avoids TimeoutError on HF stats ping
+os.environ.setdefault("UNSLOTH_DISABLE_STATISTICS", "1")
+
+if not torch.cuda.is_available():
+    raise RuntimeError(
+        "No GPU visible to PyTorch. Colab: Runtime → Change runtime type → set "
+        "Hardware accelerator to GPU (T4, L4, A100, …) → Save, then re-run. "
+        "If you are on **CPU** only, this notebook cannot train; connect a GPU session."
+    )
 print(torch.cuda.get_device_name(0), torch.cuda.get_device_properties(0).total_memory / 1e9, "GB VRAM")
 print("torch", torch.__version__, "cuda", torch.version.cuda)
 
@@ -80,10 +105,37 @@ MIN_REWARD_KEEP = 0.25""")
 
 add_md("## Step 3 — Load dataset")
 
-add_code("""from datasets import load_dataset
+add_code("""import json as _json
 import pandas as pd
+from datasets import Dataset, DatasetDict, load_dataset
+from huggingface_hub import hf_hub_download
 
-raw = load_dataset(DATASET_ID, token=HF_TOKEN)
+
+def load_parlay_episodes():
+    \"\"\"Prefer `load_dataset`; fall back to raw JSONL if Colab's old `datasets` can't parse `Json` features.\"\"\"
+    try:
+        return load_dataset(DATASET_ID, token=HF_TOKEN)
+    except (ValueError, KeyError) as e:
+        msg = str(e)
+        if "Json" not in msg and "Feature type" not in msg:
+            raise
+        path = hf_hub_download(
+            repo_id=DATASET_ID,
+            repo_type="dataset",
+            filename="episodes_v2.jsonl",
+            token=HF_TOKEN,
+        )
+        rows = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    rows.append(_json.loads(line))
+        df = pd.DataFrame(rows)
+        return DatasetDict({"train": Dataset.from_pandas(df, preserve_index=False)})
+
+
+raw = load_parlay_episodes()
 df = raw["train"].to_pandas()
 print(len(df), "rows", list(df.columns))
 if "reward" in df.columns:
@@ -137,7 +189,10 @@ eval_data  = Dataset.from_list(formatted[split:])""")
 
 add_md("## Step 5 — Model + LoRA (Unsloth)")
 
-add_code("""from unsloth import FastLanguageModel
+add_code("""import os
+os.environ.setdefault("UNSLOTH_DISABLE_STATISTICS", "1")
+
+from unsloth import FastLanguageModel
 from unsloth.chat_templates import get_chat_template
 
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -146,6 +201,7 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     dtype=None,
     load_in_4bit=True,
     token=HF_TOKEN,
+    disable_log_stats=True,
 )
 tokenizer = get_chat_template(tokenizer, chat_template="chatml")
 model = FastLanguageModel.get_peft_model(
@@ -187,7 +243,7 @@ args = SFTConfig(
     fp16=not torch.cuda.is_bf16_supported(),
     bf16=torch.cuda.is_bf16_supported(),
     logging_steps=5,
-    evaluation_strategy="epoch",
+    eval_strategy="epoch",
     save_strategy="epoch",
     report_to="none",
     seed=42,

@@ -48,6 +48,7 @@ _sessions: dict[str, dict[str, Any]] = {}
 # Opponent backend for /api/game/move: "gemini" (default) or "trained" (HF_MODEL_REPO + Qwen)
 OPPONENT_MODE: str = "gemini"
 _RESULTS_DIR = Path("results")
+_IMAGES_DIR = Path("images")
 _CP_COSTS: dict[TacticalMove, int] = {
     TacticalMove.ANCHOR_HIGH: 0,
     TacticalMove.BATNA_REVEAL: 20,
@@ -345,6 +346,13 @@ def _training_status_payload() -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             has_results = False
     repo = (os.environ.get("HF_MODEL_REPO") or "").strip() or None
+
+    sft_loss_path: str | None = None
+    if (_IMAGES_DIR / "sft_loss_curve.png").is_file():
+        sft_loss_path = "/images/sft_loss_curve.png"
+    elif (_RESULTS_DIR / "sft_loss_curve.png").is_file():
+        sft_loss_path = "/results/sft_loss_curve.png"
+
     return {
         "has_results": has_results,
         "grpo_mean_reward": grpo,
@@ -352,10 +360,12 @@ def _training_status_payload() -> dict[str, Any]:
         "random_mean_reward": rnd,
         "model_on_hub": bool(repo),
         "model_repo": repo,
+        "sft_loss_url": sft_loss_path,
         "plots_available": {
             "reward_curve": (_RESULTS_DIR / "grpo_reward_curve.png").is_file(),
             "comparison": (_RESULTS_DIR / "training_curves.png").is_file(),
             "transcript": (_RESULTS_DIR / "before_after_transcript.html").is_file(),
+            "sft_loss": sft_loss_path is not None,
         },
     }
 

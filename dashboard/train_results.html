@@ -137,6 +137,12 @@
     </section>
 
     <section>
+      <h2>SFT cold start — training loss</h2>
+      <div id="fig-sft"></div>
+      <p class="caption" id="cap-sft" hidden>Supervised fine-tuning loss (Qwen2.5-1.5B + LoRA on Parlay episodes from Colab).</p>
+    </section>
+
+    <section>
       <h2>GRPO Training Curve</h2>
       <div id="fig-reward"></div>
       <p class="caption" id="cap-reward" hidden>Mean episode reward over 120 GRPO training steps. Dashed line = random baseline.</p>
@@ -196,6 +202,19 @@
         const x = g - r;
         d.textContent = (x >= 0 ? "↑ +" : "↓ ") + x.toFixed(1) + " vs baseline";
         d.style.color = x >= 0 ? "var(--emerald)" : "var(--scarlet)";
+      }
+    }
+    function sftSection(url) {
+      const el = document.getElementById("fig-sft");
+      const cap = document.getElementById("cap-sft");
+      if (url) {
+        el.innerHTML = '<img src="' + url + '" alt="SFT training loss" style="width:100%;border:1px solid var(--gold);border-radius:2px" />';
+        cap.hidden = false;
+      } else {
+        el.innerHTML = '<div class="fig-placeholder">SFT loss curve will appear after running ' +
+          '<a href="https://colab.research.google.com/github/sh4shv4t/Parlay/blob/main/training/notebooks/sft_qwen_colab.ipynb" target="_blank" rel="noopener">sft_qwen_colab.ipynb</a> ' +
+          'or by adding <code>images/sft_loss_curve.png</code> to the repo.</div>';
+        cap.hidden = true;
       }
     }
     function rewardSection(pa) {
@@ -272,6 +291,7 @@
         if (data.has_results) {
           document.querySelector(".subtitle")?.setAttribute("data-has-eval", "1");
         }
+        sftSection(data.sft_loss_url);
         rewardSection(data.plots_available);
         compareSection(data.plots_available);
         await transcriptSection(data.plots_available);

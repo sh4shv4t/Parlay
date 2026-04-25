@@ -78,6 +78,12 @@ try:
 except OSError as exc:
     logger.warning("Could not mount /results: %s", exc)
 
+os.makedirs("images", exist_ok=True)
+try:
+    app.mount("/images", StaticFiles(directory="images"), name="images")
+except OSError as exc:
+    logger.warning("Could not mount /images: %s", exc)
+
 
 @app.get("/", include_in_schema=False)
 async def serve_index() -> FileResponse:

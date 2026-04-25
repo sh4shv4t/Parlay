@@ -165,6 +165,8 @@ GRPO Fine-tuning — 100 steps, G=4, static JSONL prompts
   sh4shv4t/parlay-grpo-1-5b
 ```
 
+**Run GRPO on Hugging Face Jobs** (pre-paid credits, data + SFT on the Hub; `scripts/hf_grpo_entry.sh`; template uses **`--timeout 6h`** and **`a100-large`**): see [`training/GRPO_HF_RUNBOOK.md`](training/GRPO_HF_RUNBOOK.md).
+
 ```text
 Gemini self-play (generate_data.py)
     → 80 quality-filtered episodes across 9 persona×scenario combos
@@ -183,6 +185,8 @@ We use GRPO ([Shao et al., 2024](https://arxiv.org/abs/2402.03300)) for the same
 The ω warmup is a practical detail worth flagging: at step 0, the base model occasionally breaches the BATNA floor (it doesn't know where the floor is). Each breach gives -200, which drowns all positive signal. Starting at ω=50 gives the model enough runway to learn the floor before the cliff becomes absolute.
 
 ### Results
+
+![SFT training loss — Qwen2.5-1.5B + LoRA on Parlay episodes](images/sft_loss_curve.png)
 
 ![Mean episode reward over GRPO training steps](results/grpo_reward_curve.png)
 
