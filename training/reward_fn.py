@@ -50,19 +50,27 @@ _OFFER_RE = re.compile(r'["\']offer["\']\s*:\s*([0-9eE+.-]+)', re.IGNORECASE)
 
 
 def _parse_offer_anti_capitulation(completion: str) -> float | None:
-    # Robust parse: handles both JSON and partial JSON completions
-    text = _clean_json(completion)
     try:
-        data = json.loads(text)
+        data = json.loads(completion)
         if not isinstance(data, dict):
             return None
-        return float(data.get("offer_amount") or float("inf"))
+        oa = data.get("offer_amount", None)
+        if oa is None:
+            return None
+        return float(oa)
     except (json.JSONDecodeError, TypeError, ValueError):
         pass
-    m = _OFFER_AMOUNT_RE.search(text) or _OFFER_RE.search(text)
+    m = re.search(r'"offer_amount"\s*:\s*([\d.]+)', completion)
     if m:
         try:
             return float(m.group(1))
+        except ValueError:
+            return None
+    text = _clean_json(completion)
+    m2 = _OFFER_AMOUNT_RE.search(text) or _OFFER_RE.search(text)
+    if m2:
+        try:
+            return float(m2.group(1))
         except ValueError:
             return None
     return None
@@ -175,7 +183,7 @@ def anti_capitulation_reward(completions: list[str], **kwargs) -> list[float]:
     for completion in completions:
         offer = _parse_offer_anti_capitulation(completion)
         if offer is None:
-            logger.debug("anti_capitulation_reward: no offer parsed, reward 0.0")
+            logger.debug("anti_capitulation_reward: no offer parsed, reward=0.0")
             rewards.append(0.0)
             continue
         if is_buyer_ai:
@@ -199,9 +207,9 @@ def format_reward(completions: list[str], **kwargs) -> list[float]:
     (not a cliff for invalid output).
 
     Returns:
-        1.0 if valid JSON with non-empty ``utterance`` and ``offer_amount`` present;
-        0.5 if valid JSON with at least non-empty ``utterance``;
-        0.3 if the string contains the word ``utterance`` (not valid JSON);
+        1.0 if valid JSON with both ``utterance`` and ``offer_amount`` keys;
+        0.5 if valid JSON with at least ``utterance`` key;
+        0.3 if not valid JSON but the string contains the word ``utterance``;
         0.0 otherwise.
     """
     rewards = []
@@ -216,13 +224,11 @@ def format_reward(completions: list[str], **kwargs) -> list[float]:
         if not isinstance(data, dict):
             rewards.append(0.3 if word_utterance.search(completion) else 0.0)
             continue
-        u = str(data.get("utterance", "")).strip()
-        oa = data.get("offer_amount", None)
-        has_utterance = bool(u)
-        has_both = has_utterance and oa is not None
-        if has_both:
+        has_u = "utterance" in data
+        has_oa = "offer_amount" in data
+        if has_u and has_oa:
             rewards.append(1.0)
-        elif has_utterance:
+        elif has_u:
             rewards.append(0.5)
         else:
             rewards.append(0.3 if word_utterance.search(completion) else 0.0)

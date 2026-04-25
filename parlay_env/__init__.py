@@ -1,3 +1,10 @@
+from .openenv_compat import (
+    OPENENV_AVAILABLE,
+    OPENENV_VERSION,
+    GenericEnvClient,
+    GenericAction,
+)
+from .client import ParlayEnvClient, ParlayAction as ClientParlayAction
 from .models import (
     PersonaType,
     TacticalMove,
@@ -21,6 +28,12 @@ VERSION = "1.0.0"
 
 __all__ = [
     "VERSION",
+    "OPENENV_AVAILABLE",
+    "OPENENV_VERSION",
+    "GenericEnvClient",
+    "GenericAction",
+    "ParlayEnvClient",
+    "ClientParlayAction",
     "PersonaType",
     "TacticalMove",
     "HiddenState",

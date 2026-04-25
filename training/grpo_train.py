@@ -181,6 +181,111 @@ def _load_peft_policy_from_sft(sft: str) -> "object":
     return PeftModel.from_pretrained(base_m, sft)
 
 
+def _save_training_plots(trainer, output_dir: str, tag: str = "grpo"):
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from pathlib import Path
+
+        results = Path("results")
+        results.mkdir(exist_ok=True)
+        plots = Path(output_dir) / "plots"
+        plots.mkdir(parents=True, exist_ok=True)
+
+        log = getattr(getattr(trainer, "state", None), "log_history", []) or []
+        if not log:
+            print("No log history to plot")
+            return
+
+        # Reward curve
+        reward_pts = [
+            (
+                x.get("step", i),
+                x.get(
+                    "rewards/mean",
+                    x.get("reward/mean", x.get("reward", None)),
+                ),
+            )
+            for i, x in enumerate(log)
+        ]
+        reward_pts = [(s, r) for s, r in reward_pts if r is not None]
+
+        if reward_pts:
+            steps, rewards = zip(*reward_pts)
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.plot(
+                steps,
+                rewards,
+                linewidth=2,
+                color="#2196F3",
+                label="GRPO reward",
+            )
+            ax.axhline(
+                y=0, color="red", linestyle="--", alpha=0.5, label="Zero baseline"
+            )
+            ax.set_xlabel("Training Step")
+            ax.set_ylabel("Mean Reward")
+            ax.set_title(
+                "Parlay — GRPO Training Reward\n"
+                "Qwen2.5-1.5B  |  SFT → GRPO  |  Negotiation MDP"
+            )
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            for p in [results / "grpo_reward_curve.png", plots / f"{tag}_reward.png"]:
+                plt.savefig(p, dpi=150, bbox_inches="tight")
+                print(f"Saved: {p}")
+            plt.close()
+
+            r_list = list(rewards)
+            print(
+                f"\nReward: first={r_list[0]:.2f}  "
+                f"last={r_list[-1]:.2f}  "
+                f"gain={r_list[-1] - r_list[0]:+.2f}  "
+                f"max={max(r_list):.2f}"
+            )
+
+        # Loss curve
+        loss_pts = [
+            (x.get("step", i), x.get("loss", x.get("train_loss", None)))
+            for i, x in enumerate(log)
+        ]
+        loss_pts = [(s, l) for s, l in loss_pts if l is not None]
+
+        if loss_pts:
+            steps, losses = zip(*loss_pts)
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.plot(
+                steps,
+                losses,
+                linewidth=2,
+                color="#FF5722",
+                label="Training loss",
+            )
+            ax.set_xlabel("Training Step")
+            ax.set_ylabel("Loss")
+            ax.set_title(
+                "Parlay — GRPO Training Loss\n"
+                "Qwen2.5-1.5B  |  SFT → GRPO  |  Negotiation MDP"
+            )
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            for p in [results / "grpo_loss_curve.png", plots / f"{tag}_loss.png"]:
+                plt.savefig(p, dpi=150, bbox_inches="tight")
+            plt.close()
+
+        import json as _json
+
+        (plots / f"{tag}_log.json").write_text(
+            _json.dumps(log, indent=2), encoding="utf-8"
+        )
+    except Exception as e:
+        print(f"Plot generation failed (non-fatal): {e}")
+
+
 def train_grpo(
     sft_model_path: str,
     data_path: str,
@@ -311,6 +416,7 @@ def train_grpo(
         f"prompts={len(dataset)}, G={g}, steps={steps}"
     )
     trainer.train()
+    _save_training_plots(trainer, output_dir)
     trainer.save_model(output_dir)
     logger.info(f"GRPO training complete. Model saved to {output_dir}")
 

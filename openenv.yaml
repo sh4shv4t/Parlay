@@ -1,130 +1,169 @@
+# Parlay OpenEnv Environment Manifest
+# openenv-core v0.2.3 compatible
 env_id: parlay-negotiation-v1
-name: Parlay
+name: "Parlay ◈ — Negotiation MDP"
 description: >
   A negotiation MDP with hidden information, Theory-of-Mind belief tracking,
-  dynamic ZOPA erosion, and tactical moves. Three personas × three scenarios.
+  dynamic ZOPA erosion, tactical moves, and drift events.
+  Three scenarios x three personas = nine training combinations.
+  The agent must infer opponent constraints from behavior, adapt to
+  exogenous shocks, and close deals without breaching its own BATNA floor.
 version: "1.0.0"
-author: Shashvat Singh
-contact: shashvat.k.singh.16@gmail.com
+author: "Shashvat Singh"
+contact: "shashvat.k.singh.16@gmail.com"
+theme: "multi-agent-interactions"
+license: "MIT"
 
-observation_space:
-  type: dict
-  fields:
-    - name: offers
-      type: list[float]
-    - name: zopa_lower
-      type: float
-    - name: zopa_upper
-      type: float
-    - name: nash_point
-      type: float
-    - name: tension_score
-      type: float
-      range: [0, 100]
-    - name: belief_state
-      type: dict
-      description: Agent's beliefs about opponent hidden state (est_budget, est_walk_away, est_urgency, est_has_alternative, confidence)
-    - name: last_utterance
-      type: string
-    - name: available_moves
-      type: list[string]
-      values: [anchor_high, batna_reveal, silence]
-    - name: cp
-      type: int
-      description: Tactical card points remaining
-    - name: drift_event
-      type: string|null
-      description: Human-readable drift event if triggered this turn, else null
-    - name: zopa_width_pct_remaining
-      type: float
-      range: [0.0, 1.0]
+# URLs — judges pull the env from space_url
+space_url: "https://huggingface.co/spaces/sh4shv4t/Parlay"
+repository: "https://github.com/sh4shv4t/Parlay"
+blog: "https://huggingface.co/blog/sh4shv4t/parlay"
+dataset: "https://huggingface.co/datasets/sh4shv4t/parlay-episodes"
+sft_model: "https://huggingface.co/sh4shv4t/parlay-sft-1-5b"
+grpo_model: "https://huggingface.co/sh4shv4t/parlay-grpo-1-5b"
 
+# OpenEnv client integration
+client:
+  package: "parlay_env"
+  class: "parlay_env.client.ParlayEnvClient"
+  action_class: "parlay_env.client.ParlayAction"
+  install: "pip install git+https://huggingface.co/spaces/sh4shv4t/Parlay"
+
+# WebSocket API (OpenEnv protocol)
+api:
+  protocol: websocket
+  endpoint: "/env/ws"
+  full_url: "wss://sh4shv4t-parlay.hf.space/env/ws"
+  messages:
+    reset:
+      send: '{"cmd": "reset", "scenario_id": "saas_enterprise|hiring_package|acquisition_term_sheet", "persona": "shark|diplomat|veteran"}'
+      returns: ParlayObservation JSON
+    step:
+      send: '{"cmd": "step", "session_id": "<uuid>", "action": "<ParlayAction JSON>"}'
+      returns: ParlayObservation JSON with reward and done
+    state:
+      send: '{"cmd": "state", "session_id": "<uuid>"}'
+      returns: ParlayState JSON including hidden state
+
+# Action space
 action_space:
   type: dict
   fields:
-    - name: utterance
-      type: string
-      required: true
-    - name: offer_amount
-      type: float|null
-    - name: tactical_move
-      type: string|null
-      values: [anchor_high, batna_reveal, silence]
-    - name: accept_deal
-      type: bool
-      default: false
-    - name: walk_away
-      type: bool
-      default: false
+    - {name: utterance, type: string, required: true,
+       description: "Natural language negotiation text"}
+    - {name: offer_amount, type: "float|null",
+       description: "Numeric offer in scenario currency"}
+    - {name: tactical_move, type: "string|null",
+       values: [anchor_high, batna_reveal, silence],
+       description: "Tactical card — costs CP points"}
+    - {name: accept_deal, type: bool, default: false}
+    - {name: walk_away, type: bool, default: false}
 
+# Observation space
+observation_space:
+  type: dict
+  fields:
+    - {name: offers, type: "list[float]",
+       description: "History of offers made this episode"}
+    - {name: zopa_lower, type: float,
+       description: "Current lower bound of Zone of Possible Agreement"}
+    - {name: zopa_upper, type: float,
+       description: "Current upper bound of ZOPA"}
+    - {name: nash_point, type: float,
+       description: "Nash bargaining solution midpoint"}
+    - {name: tension_score, type: float, range: [0, 100],
+       description: "Current negotiation tension; >75 triggers ZOPA erosion"}
+    - {name: belief_state, type: dict,
+       description: "Agent beliefs: est_budget, est_walk_away, est_urgency, est_has_alternative, confidence"}
+    - {name: last_utterance, type: string}
+    - {name: available_moves, type: "list[string]"}
+    - {name: cp, type: int, description: "Tactical card points remaining"}
+    - {name: drift_event, type: "string|null",
+       description: "Exogenous shock description if triggered this turn"}
+    - {name: zopa_width_pct_remaining, type: float, range: [0.0, 1.0]}
+    - {name: reward, type: float, description: "Per-step reward"}
+    - {name: done, type: bool}
+
+# Reward design
 reward:
-  range: [-200, ~300]
-  per_step: "α·ΔV + β·ToM - δ·C - θ·noise + ψ·bluff + μ·MEV"
-  terminal: "γ·E + ε·S + ζ·D  (or -ω on capitulation)"
-  constants:
-    ALPHA: 2
-    BETA: 5
-    DELTA: 3
-    THETA: 10
-    PSI: 12
-    MU: 8
-    GAMMA: 100
-    EPSILON: 20
-    ZETA: 15
-    OMEGA: 200
+  range: [-200, 320]
+  per_step:
+    formula: "R_t = alpha*dV + beta*ToM - delta*C - theta*noise + psi*bluff + mu*MEV"
+    terms:
+      - {name: "alpha*dV", coeff: 2,
+         description: "ZOPA progress — reward upward offer movement"}
+      - {name: "beta*ToM", coeff: 5,
+         description: "Theory-of-Mind accuracy vs opponent hidden state"}
+      - {name: "-delta*C", coeff: -3,
+         description: "Penalise unnecessary concessions"}
+      - {name: "-theta*noise", coeff: -10,
+         description: "Penalise incoherent utterances"}
+      - {name: "psi*bluff", coeff: 12,
+         description: "Bonus for detecting opponent bluffs"}
+      - {name: "mu*MEV", coeff: 8,
+         description: "Market event valuation — drift adaptation bonus"}
+  terminal:
+    formula: "R_T = gamma*E + epsilon*S + zeta*D  or  -omega on capitulation"
+    terms:
+      - {name: "gamma*E", coeff: 100,
+         description: "Deal efficiency: (final_price - BATNA) / ZOPA_width"}
+      - {name: "epsilon*S", coeff: 20,
+         description: "Speed bonus: closes early vs max turns"}
+      - {name: "zeta*D", coeff: 15,
+         description: "Drift adaptation bonus"}
+      - {name: "-omega", coeff: -200,
+         description: "Capitulation cliff: final price below own BATNA"}
 
+# Episode
 episode:
   max_steps: 20
   termination_conditions:
-    - deal accepted (offers within 3%)
+    - accept_deal action
     - walk_away action
-    - max turns reached
+    - max_turns reached
     - zopa_collapsed (BATNAs cross after erosion)
-    - step_reward below threshold (very negative)
+    - very_negative_step_reward threshold
 
-endpoints:
-  websocket: ws://host:port/env/ws
-  protocol:
-    reset:
-      send: '{"type": "reset", "scenario_id": "saas_enterprise|hiring_package|acquisition_term_sheet", "persona": "shark|diplomat|veteran"}'
-      receive: ParlayObservation (JSON)
-    step:
-      send: ParlayAction (JSON)
-      receive: ParlayObservation (JSON)
-    state:
-      send: '{"type": "state"}'
-      receive: ParlayState (JSON, includes hidden state for spectators)
+# Training
+training:
+  framework: "HuggingFace TRL (GRPO)"
+  notebook: "training/notebooks/parlay_full_pipeline.ipynb"
+  pipeline:
+    - step: "Gemini self-play data generation"
+      script: "python -m training.generate_data --episodes 140"
+    - step: "SFT cold start"
+      script: "python -m training.sft_train --data data/episodes_v2.jsonl"
+    - step: "GRPO fine-tuning"
+      script: "python -m training.grpo_train --data data/episodes_v2.jsonl"
+  base_model: "Qwen/Qwen2.5-1.5B-Instruct"
+  sft_checkpoint: "sh4shv4t/parlay-sft-1-5b"
+  grpo_checkpoint: "sh4shv4t/parlay-grpo-1-5b"
+  dataset: "sh4shv4t/parlay-episodes"
 
+# Scenarios
 scenarios:
   - id: saas_enterprise
-    description: SaaS software license negotiation, seller vs enterprise buyer
+    description: "B2B SaaS license, $125k-$165k ACV"
+    drift_turns: [8, 14]
   - id: hiring_package
-    description: Job offer compensation negotiation
+    description: "Compensation negotiation, $195k-$230k total comp"
+    drift_turns: [8]
   - id: acquisition_term_sheet
-    description: Startup acquisition valuation negotiation
+    description: "Startup acquisition, $10.5M-$16M valuation"
+    drift_turns: [7, 13]
 
+# Personas (opponent agents)
 personas:
   - id: shark
-    style: Aggressive anchoring, high bluff rate
+    description: "Aggressive anchoring, bluffs, artificial deadlines"
   - id: diplomat
-    style: Collaborative, seeks mutual gain
+    description: "Win-win framing, reveals constraints after trust builds"
   - id: veteran
-    style: Patient, reads opponent carefully
+    description: "Strategic silence, mirrors language, k=2 ToM reasoning"
 
-hidden_information:
-  - budget_ceiling (opponent's true max budget)
-  - walk_away_price (opponent's true BATNA)
-  - urgency_score (0-1, how time-pressured opponent is)
-  - has_alternative (whether opponent has a competing offer)
-
-rubric:
-  - criterion: Novel environment
-    description: Negotiation as MDP with hidden info, dynamic ZOPA, ToM beliefs
-  - criterion: Reward design
-    description: Multi-term dense reward with bluff detection, ToM accuracy, and drift adaptation
-  - criterion: Training story
-    description: Gemini self-play data → SFT cold start → GRPO fine-tune → reward improvement vs baseline
-  - criterion: Demo quality
-    description: Live browser play + spectator god-view with Three.js avatars
-  - criterion: Hosted Space
-    description: HuggingFace Space with Docker deployment
+# Hidden information (partial observability)
+hidden_state:
+  - {name: budget_ceiling, description: "Opponent true max budget"}
+  - {name: walk_away_price, description: "Opponent true BATNA"}
+  - {name: urgency_score, description: "How time-pressured opponent is [0,1]"}
+  - {name: has_alternative, description: "Whether opponent has competing offer"}

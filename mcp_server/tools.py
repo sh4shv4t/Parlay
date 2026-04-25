@@ -1,6 +1,9 @@
 """
 Parlay MCP tools — universal protocol (works with any MCP client).
 8 tools covering negotiation lifecycle, game state, and leaderboard.
+
+Tool names intentionally avoid exactly: reset, step, state, close — those
+identifiers are reserved by OpenEnv / client connection helpers.
 """
 import logging
 import uuid
