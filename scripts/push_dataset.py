@@ -5,7 +5,26 @@ import os
 import tempfile
 from pathlib import Path
 
+# Load .env from project root (same pattern as the rest of the app)
+_ROOT = Path(__file__).resolve().parents[1]
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(_ROOT / ".env")
+    load_dotenv(_ROOT / ".env.local")
+except ImportError:
+    pass
+
 from huggingface_hub import HfApi
+
+
+def _resolve_hf_token() -> str | None:
+    """HF_TOKEN, HUGGING_FACE_HUB_TOKEN, or huggingface-cli default (hub reads env)."""
+    for key in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+        v = os.environ.get(key)
+        if v and str(v).strip():
+            return str(v).strip()
+    return None
 
 
 def push_dataset(jsonl_path: str, repo_id: str, token: str):
@@ -84,8 +103,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default="data/episodes_v2.jsonl")
     parser.add_argument("--repo", default="sh4shv4t/parlay-episodes")
-    parser.add_argument("--token", default=os.environ.get("HF_TOKEN"))
+    default_tok = _resolve_hf_token()
+    parser.add_argument(
+        "--token",
+        default=default_tok,
+        help="Hugging Face token (or set HF_TOKEN / HUGGING_FACE_HUB_TOKEN, or .env)",
+    )
     args = parser.parse_args()
     if not args.token:
-        raise ValueError("Set HF_TOKEN env var or pass --token")
+        raise ValueError(
+            "No Hugging Face token found. Add HF_TOKEN=... to .env in the project root, "
+            "export HF_TOKEN (or HUGGING_FACE_HUB_TOKEN), or pass --token."
+        )
     push_dataset(args.data, args.repo, args.token)
