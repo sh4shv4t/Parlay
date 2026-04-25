@@ -9,6 +9,10 @@ tags: ["openenv", "hackathon", "rl", "gametheory"]
 ---
 
 # Parlay — The RL Negotiation Arena
+![Python 3.11](https://img.shields.io/badge/Python-3.11-blue)
+![OpenEnv Compliant](https://img.shields.io/badge/OpenEnv-Compliant-00C853)
+![MIT License](https://img.shields.io/badge/License-MIT-green)
+![HF Spaces](https://img.shields.io/badge/HF%20Spaces-Ready-yellow)
 
 > **The arena where AIs learn to close.**
 
