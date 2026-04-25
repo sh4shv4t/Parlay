@@ -33,16 +33,16 @@ Parlay is an [OpenEnv](https://github.com/huggingface/openenv)-compliant RL envi
 **Three scenarios, three opponents. Nine combinations to train on.**
 
 | Scenario | Stakes | Key Drift Events |
-|---|---|---|
+|----------|--------|------------------|
 | `saas_enterprise` | $125k–$165k ACV | Competitor price drop at turn 8, Q-end deadline at turn 14 |
 | `hiring_package` | $195k–$230k total comp | Competing offer received at turn 5 |
 | `acquisition_term_sheet` | $10.5M–$16M valuation | Tech debt discovery at turn 7, second acquirer at turn 13 |
 
-| Persona | Style | 
-|---|---|
+| Persona | Style |
+|---------|-------|
 | **Shark** | Aggressive anchors, artificial deadlines, never concedes first |
 | **Diplomat** | Win-win framing, reveals constraints after trust builds, never bluffs |
-| **Veteran** | Strategic silence, mirrors your language, models *your model of them* | 
+| **Veteran** | Strategic silence, mirrors your language, models <em>your model of them</em> |
 
 The agent never sees the full state. The opponent's true walk-away price, urgency score, and budget ceiling are **hidden**  and the agent has to *infer* them from behaviour.
 
@@ -56,11 +56,15 @@ Parlay's reward function has two components.
 
 ### Per-Step Reward (shapes *how* the agent negotiates)
 
-$$R_t = \underbrace{\alpha \cdot \Delta V_t}_{\text{ZOPA progress}} + \underbrace{\beta \cdot \text{ToM}_t}_{\text{belief accuracy}} - \underbrace{\delta \cdot C_t}_{\text{capitulation penalty}} - \underbrace{\theta \cdot \text{noise}_t}_{\text{incoherence penalty}} + \underbrace{\psi \cdot \text{Bluff}_t}_{\text{bluff detection}} + \underbrace{\mu \cdot \text{MEV}_t}_{\text{market event inference}}$$
+$$
+R_t = \underbrace{\alpha \cdot \Delta V_t}_{\text{ZOPA progress}} + \underbrace{\beta \cdot \text{ToM}_{t}}_{\text{belief accuracy}} - \underbrace{\delta \cdot C_t}_{\text{capitulation penalty}} - \underbrace{\theta \cdot \text{noise}_{t}}_{\text{incoherence penalty}} + \underbrace{\psi \cdot \text{Bluff}_{t}}_{\text{bluff detection}} + \underbrace{\mu \cdot \text{MEV}_{t}}_{\text{market event inference}}
+$$
 
 The **ToM term** is the novel contribution. At each step, the grader compares the agent's belief state against the opponent's hidden ground truth:
 
-$$\text{ToM}_t = 1 - \frac{1}{|B|}\sum_{i \in B} \frac{|\hat{b}_i - b_i|}{\text{range}_i}$$
+$$
+\text{ToM}_{t} = 1 - \frac{1}{|B|}\sum_{i \in B} \frac{|\hat{b}_i - b_i|}{\text{range}_i}
+$$
 
 where $B = \{\text{budget, urgency, walk-away}\}$. An agent can get a good deal *and* have terrible ToM accuracy (lucky anchor). With this term, it has to develop genuine mental state inference to maximise cumulative reward.
 
@@ -70,9 +74,11 @@ The **MEV term** is the second-order challenge (see below).
 
 ### Terminal Reward (rewards *outcomes*)
 
-$$R_T = \underbrace{\gamma \cdot E}_{\text{deal efficiency}} + \underbrace{\epsilon \cdot S}_{\text{speed bonus}} + \underbrace{\zeta \cdot D}_{\text{drift adaptation}} - \underbrace{\omega \cdot \mathbf{1}[\text{price} < \text{BATNA}]}_{\text{capitulation cliff}}$$
+$$
+R_T = \underbrace{\gamma \cdot E}_{\text{deal efficiency}} + \underbrace{\epsilon \cdot S}_{\text{speed bonus}} + \underbrace{\zeta \cdot D}_{\text{drift adaptation}} - \underbrace{\omega \cdot \mathbf{1}[\text{price} < \text{BATNA}]}_{\text{capitulation cliff}}
+$$
 
-where deal efficiency $E = \frac{\text{final price} - \text{BATNA}_\text{self}}{\text{ZOPA width}} \in [0, 1]$.
+where deal efficiency $E = \frac{\text{final price} - \text{BATNA}_{\text{self}}}{\text{ZOPA width}} \in [0, 1]$.
 
 The $\omega = 200$ term is **intentionally discontinuous**. Any smooth penalty can be overcome by a high deal value. The cliff makes the agent's floor absolute — it learns there is a line it simply cannot cross.
 
@@ -88,9 +94,11 @@ In real negotiations, if both sides dig in and tension keeps rising, alternative
 
 Every turn where tension exceeds 75, a streak counter increments. After 3 consecutive turns above threshold:
 
-$$\text{BATNA}_\text{buyer} \mathrel{-}= \Delta_\text{orig} \cdot r_\text{erosion}, \quad \text{BATNA}_\text{seller} \mathrel{+}= \Delta_\text{orig} \cdot r_\text{erosion}$$
+$$
+\text{BATNA}_{\text{buyer}} \mathrel{-}= \Delta_{\text{orig}} \cdot r_{\text{erosion}}, \quad \text{BATNA}_{\text{seller}} \mathrel{+}= \Delta_{\text{orig}} \cdot r_{\text{erosion}}
+$$
 
-where $\Delta_\text{orig}$ is the original ZOPA width and $r_\text{erosion} = 0.02$. Using the original width (not the current shrinking width) ensures collapse actually terminates rather than being asymptotic.
+where $\Delta_{\text{orig}}$ is the original ZOPA width and $r_{\text{erosion}} = 0.02$. Using the original width (not the current shrinking width) ensures collapse actually terminates rather than being asymptotic.
 
 The agent can see `zopa_width_pct_remaining` in every observation. The ZOPA bar in the UI shifts from gold → amber → scarlet as the deal zone shrinks.
 
@@ -102,7 +110,7 @@ The agent can see `zopa_width_pct_remaining` in every observation. The ZOPA bar 
 
 Between turns, exogenous events fire like for example a Fed rate hike, a competitor product recall, a key employee departure, etc. The **headline is public** but the true impact on each party's walk-away price is **hidden and persona-specific**.
 
-```
+```text
 ⚡ BREAKING — Federal Reserve raises rates 50 basis points
 ```
 
@@ -110,7 +118,9 @@ The Shark (mev_sensitivity=0.65) recalculates aggressively. The Veteran (mev_sen
 
 The grader compares this against ground truth:
 
-$$\text{MEV}_t = 1 - \frac{|\hat{v} - v^*|}{0.30}$$
+$$
+\text{MEV}_{t} = 1 - \frac{|\hat{v} - v^*|}{0.30}
+$$
 
 This is a second-order ToM problem which does not just think about "what does the opponent want?" but "how did this external shock update what the opponent wants, and by how much more or less than it updated me?"
 
@@ -120,7 +130,7 @@ No prior negotiation RL paper has this layer.
 
 ## Training Pipeline
 
-```
+```text
 Gemini self-play (generate_data.py)
     → 80 quality-filtered episodes across 9 persona×scenario combos
     → Only keeps: deal_efficiency ≥ 0.25 | principled walkaway | drift_adapted | ToM ≥ 0.5
@@ -133,7 +143,7 @@ GRPO fine-tune (grpo_train.py)
     → ω warmup: OMEGA=50 for first 30 steps, then restore 200
 ```
 
-We use GRPO ([Shao et al., 2024](https://arxiv.org/abs/2402.03300)) for the same reason DeepSeek-R1 did. Tt eliminates the value model, halves memory, and is more stable for verifiable reward domains where every move can be graded. The negotiation outcome is always verifiable as either the deal was above BATNA or it wasn't and either the belief was accurate or it wasn't.
+We use GRPO ([Shao et al., 2024](https://arxiv.org/abs/2402.03300)) for the same reason DeepSeek-R1 did. It eliminates the value model, halves memory, and is more stable for verifiable reward domains where every move can be graded. The negotiation outcome is always verifiable as either the deal was above BATNA or it wasn't and either the belief was accurate or it wasn't.
 
 The ω warmup is a practical detail worth flagging: at step 0, the base model occasionally breaches the BATNA floor (it doesn't know where the floor is). Each breach gives -200, which drowns all positive signal. Starting at ω=50 gives the model enough runway to learn the floor before the cliff becomes absolute.
 
@@ -144,7 +154,7 @@ The ω warmup is a practical detail worth flagging: at step 0, the base model oc
 Four-bar comparison after 120 GRPO steps:
 
 | Agent | Mean Episode Reward |
-|---|---|
+|-------|---------------------|
 | Random baseline | ~-55 |
 | Base model (Qwen2.5-1.5B) | ~+5 |
 | GRPO trained | ~+85 |
@@ -155,7 +165,7 @@ The qualitative shift is more interesting than the numbers. The base model capit
 
 ## Try It
 
-The environment is live on [Hugging Face Spaces →](https://huggingface.co/spaces/sh4shv4t/Parlay)
+The environment is live on [Hugging Face Spaces](https://huggingface.co/spaces/sh4shv4t/Parlay).
 
 You can connect to it directly via OpenEnv:
 
@@ -184,7 +194,7 @@ Parlay is different in three ways.
 
 **The AI never goes easy.** The Shark will anchor 35% above your target and hold it. The Veteran will mirror your language back at you and wait. The Diplomat will make you feel good about a deal that's 20% below where you should have closed. None of them have a 4pm call.
 
-**You can watch the hidden state in real time.** The spectator view exposes what you can't see during a live negotiation, thinfs like the opponent's true walk-away price, their urgency score, whether they're bluffing when they reveal their BATNA. A sales manager sitting next to a junior rep can pull up the spectator URL on a second screen and coach in real time: *"See how his urgency score just jumped? Don't give him the deadline concession, make him ask for it explicitly."*
+**You can watch the hidden state in real time.** The spectator view exposes what you can't see during a live negotiation, things like the opponent's true walk-away price, their urgency score, whether they're bluffing when they reveal their BATNA. A sales manager sitting next to a junior rep can pull up the spectator URL on a second screen and coach in real time: *"See how his urgency score just jumped? Don't give him the deadline concession, make him ask for it explicitly."*
 
 **The reward signal tells you exactly where you left money on the table.** After every episode, deal efficiency $E$ tells you what fraction of the available ZOPA you captured. If you closed at $148k on a $125k–$165k ZOPA, your efficiency was 57.5%, the Nash point was $145k and you went $3k past it, but you left $17k on the table from your theoretical ceiling. That's a concrete, actionable number, not a vague "good job."
 
@@ -214,47 +224,60 @@ The deeper research question: does the MEV inference layer which trains agents t
 
 Every mechanic in Parlay traces back to a specific paper. Here's the reading list, and why each one ended up in the codebase.
 
-**Nash (1950) — "The Bargaining Problem", *Econometrica* 18(2):155–162.**
-The Nash Bargaining Solution gives a closed-form "fair" price: $p^* = \frac{\text{BATNA}_\text{buyer} + \text{BATNA}_\text{seller}}{2}$, the point that maximises the product of both sides' surplus. This is the gold ◆ diamond on the ZOPA ruler in the UI and the baseline against which deal efficiency $E$ is measured. Without a principled notion of "fair", efficiency scoring is arbitrary.
+### Nash (1950) — *The Bargaining Problem*, Econometrica 18(2):155–162
 
-**Shapley (1953) — "A Value for N-Person Games", *Contributions to the Theory of Games* 2:307–317.**
+The Nash Bargaining Solution gives a closed-form "fair" price **p**<sup>*</sup> = (BATNA<sub>buyer</sub> + BATNA<sub>seller</sub>) / 2, the point that maximises the product of both sides' surplus. This is the gold ◆ diamond on the ZOPA ruler in the UI and the baseline against which deal efficiency **E** is measured. Without a principled notion of "fair", efficiency scoring is arbitrary.
+
+### Shapley (1953) — *A Value for N-Person Games*, Contributions to the Theory of Games 2:307–317
+
 Shapley value computes each player's marginal contribution averaged over all coalition orderings, the game-theoretically fair division for multi-party deals. Built into `game_theory.py` for future multi-party episode support.
 
-**Tversky & Kahneman (1974) — "Judgment Under Uncertainty: Heuristics and Biases", *Science* 185(4157):1124–1131.**
-The empirical anchoring coefficient is 0.65m the first number in a negotiation shifts final settlement by roughly 35% of the gap between anchor and reality. This is why `anchor_high` is the 0 CP card. It's not a game mechanic, it's a documented cognitive bias. `offer_anchoring_effect()` in `game_theory.py` uses this coefficient to predict opponent counters.
+### Tversky & Kahneman (1974) — *Judgment Under Uncertainty: Heuristics and Biases*, Science 185(4157):1124–1131
 
-**Kahneman & Tversky (1979) — "Prospect Theory", *Econometrica* 47(2):263–291.**
+The empirical anchoring coefficient is 0.65 — the first number in a negotiation shifts final settlement by roughly 35% of the gap between anchor and reality. This is why `anchor_high` is the 0 CP card. It's not a game mechanic, it's a documented cognitive bias. `offer_anchoring_effect()` in `game_theory.py` uses this coefficient to predict opponent counters.
+
+### Kahneman & Tversky (1979) — *Prospect Theory*, Econometrica 47(2):263–291
+
 Losses loom larger than gains by a factor of roughly 2.25. Reframing a cost as an ROI calculation exploits this asymmetry, the same number feels different depending on whether it's presented as "what you're paying" vs "what you're getting back." This underpins the `reframe` tactical card design.
 
-**Schelling (1960) — "The Strategy of Conflict", Harvard University Press.**
+### Schelling (1960) — *The Strategy of Conflict*, Harvard University Press
+
 Credible commitment devices shift Nash equilibria. A truthful BATNA reveal changes what's rational for the opponent to offer, because they now know the negotiation has a hard floor. A detected bluff destroys credibility and shifts the equilibrium the other way. This is why `batna_reveal` is the highest-stakes card in the deck, and why the bluff detection reward term ($\psi = 12$) exists.
 
-**Rubinstein (1982) — "Perfect Equilibrium in a Bargaining Model", *Econometrica* 50(1):97–109.**
-In alternating-offers models with discount rates, impatience determines who concedes. First-mover advantage decays as patience asymmetry increases: the impatient party's share converges to $\frac{\delta_2}{1 + \delta_2}$ where $\delta_2$ is the opponent's discount factor. The Shark persona's deadline tactics are a direct implementation of this. Manufactured urgency is an attempt to artificially raise your apparent discount rate.
+### Rubinstein (1982) — *Perfect Equilibrium in a Bargaining Model*, Econometrica 50(1):97–109
 
-**Raiffa (1982) — "The Art and Science of Negotiation", Harvard University Press.**
+In alternating-offers models with discount rates, impatience determines who concedes. First-mover advantage decays as patience asymmetry increases: the impatient party's share converges to $\frac{\delta_{2}}{1 + \delta_{2}}$ where $\delta_{2}$ is the opponent's discount factor. The Shark persona's deadline tactics are a direct implementation of this. Manufactured urgency is an attempt to artificially raise your apparent discount rate.
+
+### Raiffa (1982) — *The Art and Science of Negotiation*, Harvard University Press
+
 Integrative bargaining: when parties have different priority orderings across issues, both can gain without price movement. The `sweetener` card design came from this because adding a non-price concession creates joint surplus when the concession costs you less than it's worth to the opponent.
 
-**Sutton & Barto (2018) — "Reinforcement Learning: An Introduction" (2nd ed), MIT Press.**
+### Sutton & Barto (2018) — *Reinforcement Learning: An Introduction* (2nd ed), MIT Press
+
 The formal MDP framing — state, action, reward, transition — and all mathematical notation in the reward section come from here. Every design decision in the environment maps back to the MDP formalism: hidden state is the partial observability, drift events are non-stationarity, the ZOPA collapse is a state-dependent terminal condition.
 
-**Wei et al. (2025) — "TOMA: Theory of Mind Augmented LLM Agents for Strategic Negotiation".**
-The direct justification for the $\beta \cdot \text{ToM}_t$ reward term. TOMA shows that explicit mental state modeling before utterance generation produces agents that outperform non-ToM baselines by up to 18.9% on negotiation benchmarks. Without this paper, the ToM term is a design intuition. With it, it's a grounded hypothesis with prior empirical support.
+### Wei et al. (2025) — *TOMA: Theory of Mind Augmented LLM Agents for Strategic Negotiation*
 
-**DeepSeek-AI (2025) — "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning".**
-The reason for using GRPO over PPO. DeepSeek-R1 demonstrated that group-relative policy optimization without a value model produces stable, efficient training for verifiable reward domains. Negotiation outcomes are verifiable hich makes GRPO the natural fit.
+The direct justification for the $\beta \cdot \text{ToM}_{t}$ reward term. TOMA shows that explicit mental state modeling before utterance generation produces agents that outperform non-ToM baselines by up to 18.9% on negotiation benchmarks. Without this paper, the ToM term is a design intuition. With it, it's a grounded hypothesis with prior empirical support.
 
-**Shao et al. (2024) — "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models".**
-First publication of GRPO as a formal algorithm. Group relative advantage: $A_i = \frac{r_i - \text{mean}(r_{1..G})}{\text{std}(r_{1..G})}$. The $G=4$ completions per prompt in Parlay's training config comes directly from this paper's ablations on group size.
+### DeepSeek-AI (2025) — *DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning*
 
-**Camerer et al. (2004) — "A Cognitive Hierarchy Model of Games", *QJE* 119(3):861–898.**
+The reason for using GRPO over PPO. DeepSeek-R1 demonstrated that group-relative policy optimization without a value model produces stable, efficient training for verifiable reward domains. Negotiation outcomes are verifiable which makes GRPO the natural fit.
+
+### Shao et al. (2024) — *DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models*
+
+First publication of GRPO as a formal algorithm. Group relative advantage: $A_{i} = \frac{r_{i} - \text{mean}(r_{1..G})}{\text{std}(r_{1..G})}$. The $G=4$ completions per prompt in Parlay's training config comes directly from this paper's ablations on group size.
+
+### Camerer et al. (2004) — *A Cognitive Hierarchy Model of Games*, QJE 119(3):861–898
+
 The k-level reasoning model maps directly to the Veteran persona's `tom_depth=0.92` parameter. Level-0 players act randomly, level-1 players best-respond to level-0, level-2 players best-respond to level-1. The Veteran operates at k=2 — it models your model of it, not just your stated position. This is also why the Veteran is the hardest opponent and the best training signal for developing genuine ToM.
 
-**Ziegler et al. (2019) — "Fine-Tuning Language Models from Human Preferences", arXiv:1909.08593.**
+### Ziegler et al. (2019) — *Fine-Tuning Language Models from Human Preferences*, arXiv:1909.08593
+
 The human-as-teacher flywheel is inspired by RLHF's core insight: human preference data is a valuable signal even when sparse. High-efficiency human plays (≥0.60 deal efficiency) are flagged and written to the training JSONL, improving the distribution over time. Human expertise becomes training data.
 
 ---
 
-*Code: [github.com/sh4shv4t/parlay](https://github.com/sh4shv4t/parlay) · Space: [huggingface.co/spaces/sh4shv4tE/parlay](https://huggingface.co/spaces/sh4shv4t/parlay)*
+*Code: [github.com/sh4shv4t/parlay](https://github.com/sh4shv4t/parlay) · Space: [huggingface.co/spaces/sh4shv4t/parlay](https://huggingface.co/spaces/sh4shv4t/parlay)*
 
 *— Shashvat Singh*
