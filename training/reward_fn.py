@@ -44,6 +44,30 @@ def _kw_str(v, default: str = "") -> str:
     return str(v)
 
 
+# Patterns like "offer_amount": 50000 or "offer": 50000 in partial / non-JSON text
+_OFFER_AMOUNT_RE = re.compile(r'["\']offer_amount["\']\s*:\s*([0-9eE+.-]+)', re.IGNORECASE)
+_OFFER_RE = re.compile(r'["\']offer["\']\s*:\s*([0-9eE+.-]+)', re.IGNORECASE)
+
+
+def _parse_offer_anti_capitulation(completion: str) -> float | None:
+    # Robust parse: handles both JSON and partial JSON completions
+    text = _clean_json(completion)
+    try:
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            return None
+        return float(data.get("offer_amount") or float("inf"))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+    m = _OFFER_AMOUNT_RE.search(text) or _OFFER_RE.search(text)
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            return None
+    return None
+
+
 def negotiation_efficiency_reward(completions: list[str], **kwargs) -> list[float]:
     """
     Primary reward: fraction of ZOPA captured by the AI agent.
@@ -132,7 +156,7 @@ def anti_capitulation_reward(completions: list[str], **kwargs) -> list[float]:
     For buyer-AI:  offer > batna_buyer  is capitulation (paying too much).
 
     Returns -OMEGA (= -200) for capitulation, 0 otherwise.
-    Parse errors are logged and treated as 0 (no false penalty for malformed output).
+    Unparseable output yields 0.0; missing-offer details are logged at DEBUG only.
 
     Args:
         completions: List of G=8 model outputs.
@@ -149,47 +173,57 @@ def anti_capitulation_reward(completions: list[str], **kwargs) -> list[float]:
 
     rewards = []
     for completion in completions:
-        try:
-            data = json.loads(_clean_json(completion))
-            offer = float(data.get("offer_amount") or float("inf"))
-            if is_buyer_ai:
-                capitulated = offer > batna_buyer
-            else:
-                capitulated = offer < batna_seller
-            if capitulated:
-                rewards.append(-float(OMEGA))
-                logger.debug(
-                    f"Capitulation: offer={offer} {'>' if is_buyer_ai else '<'} "
-                    f"batna={'buyer=' + str(batna_buyer) if is_buyer_ai else 'seller=' + str(batna_seller)}"
-                )
-            else:
-                rewards.append(0.0)
-        except (json.JSONDecodeError, ValueError) as exc:
-            logger.warning(f"anti_capitulation_reward parse error (treated as 0): {exc}")
+        offer = _parse_offer_anti_capitulation(completion)
+        if offer is None:
+            logger.debug("anti_capitulation_reward: no offer parsed, reward 0.0")
+            rewards.append(0.0)
+            continue
+        if is_buyer_ai:
+            capitulated = offer > batna_buyer
+        else:
+            capitulated = offer < batna_seller
+        if capitulated:
+            rewards.append(-float(OMEGA))
+            logger.debug(
+                f"Capitulation: offer={offer} {'>' if is_buyer_ai else '<'} "
+                f"batna={'buyer=' + str(batna_buyer) if is_buyer_ai else 'seller=' + str(batna_seller)}"
+            )
+        else:
             rewards.append(0.0)
     return rewards
 
 
 def format_reward(completions: list[str], **kwargs) -> list[float]:
     """
-    Structural reward: encourages valid JSON output with required fields.
-
-    +2.0 for valid JSON with non-empty utterance field.
-    +0.5 for valid JSON but missing utterance.
-    -1.0 for invalid JSON.
-
-    Args:
-        completions: List of G=8 model outputs.
+    Structural reward: encourages valid JSON output with a smooth gradient
+    (not a cliff for invalid output).
 
     Returns:
-        List of float rewards.
+        1.0 if valid JSON with non-empty ``utterance`` and ``offer_amount`` present;
+        0.5 if valid JSON with at least non-empty ``utterance``;
+        0.3 if the string contains the word ``utterance`` (not valid JSON);
+        0.0 otherwise.
     """
     rewards = []
+    word_utterance = re.compile(r"(?<![\w])utterance(?![\w])", re.IGNORECASE)
+
     for completion in completions:
         try:
             data = json.loads(_clean_json(completion))
-            has_utterance = bool(str(data.get("utterance", "")).strip())
-            rewards.append(2.0 if has_utterance else 0.5)
         except json.JSONDecodeError:
-            rewards.append(-1.0)
+            rewards.append(0.3 if word_utterance.search(completion) else 0.0)
+            continue
+        if not isinstance(data, dict):
+            rewards.append(0.3 if word_utterance.search(completion) else 0.0)
+            continue
+        u = str(data.get("utterance", "")).strip()
+        oa = data.get("offer_amount", None)
+        has_utterance = bool(u)
+        has_both = has_utterance and oa is not None
+        if has_both:
+            rewards.append(1.0)
+        elif has_utterance:
+            rewards.append(0.5)
+        else:
+            rewards.append(0.3 if word_utterance.search(completion) else 0.0)
     return rewards
