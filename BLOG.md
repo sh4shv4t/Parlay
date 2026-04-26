@@ -24,9 +24,9 @@ Language models are genuinely impressive at *describing* negotiation. Ask one to
 
 It crashes under pressure. It ignores what the opponent's behaviour is *revealing* about their hidden constraints. It doesn't notice when an external shock has just changed what the deal is worth to both sides.
 
-The core issue: negotiation isn't a question-answering task. It's a **Markov Decision Process with partial observability, strategic deception, and sparse terminal outcomes**. You need an environment that trains for *that*, not fine-tuning on negotiation transcripts.
+The core issue: negotiation isn't a question-answering task. It's a **Markov Decision Process with partial observability, strategic deception, and sparse terminal outcomes**. I needed an environment that trains for *that*, not fine-tuning on negotiation transcripts.
 
-No existing RL environment had been designed around this and so I built Parlay.
+No existing RL environment had been designed around this, so I built Parlay.
 
 ---
 
@@ -149,7 +149,7 @@ GRPO fine-tune (grpo_train.py)
     → ω warmup: OMEGA=50 for first 30 steps, then restore 200
 ```
 
-We use GRPO ([Shao et al., 2024](https://arxiv.org/abs/2402.03300)) for the same reason DeepSeek-R1 did. It eliminates the value model, halves memory, and is more stable for verifiable reward domains where every move can be graded. The negotiation outcome is always verifiable as either the deal was above BATNA or it wasn't and either the belief was accurate or it wasn't.
+I use GRPO ([Shao et al., 2024](https://arxiv.org/abs/2402.03300)) for the same reason DeepSeek-R1 did. It eliminates the value model, halves memory, and is more stable for verifiable reward domains where every move can be graded. The negotiation outcome is always verifiable as either the deal was above BATNA or it wasn't and either the belief was accurate or it wasn't.
 
 The ω warmup is a practical detail worth flagging: at step 0, the base model occasionally breaches the BATNA floor (it doesn't know where the floor is). Each breach gives -200, which drowns all positive signal. Starting at ω=50 gives the model enough runway to learn the floor before the cliff becomes absolute.
 
@@ -167,11 +167,11 @@ The table below is the digest version. The training curves are where you *see* t
   <em><strong>Figure.</strong> Supervised loss on high-quality, filtered negotiation episodes, not a generic “chat SFT” mix.</em>
 </p>
 
-This is next-token loss on a **tight, structured** dataset, Gemini self-play plus filters that keep only episodes that *already* look like the economics we care about, deals that close well, refusals that are principled, responses that track drift. The **fast early drop** is the model nailing the *syntax* of the task, JSON, turn order, the tactical vocabulary, and the broad statistics of *what good play looks like* in the data. It is a **huge, low-entropy move** in loss space because “talk like a negotiator” is still far easier to learn than “negotiate optimally against a live grader”.
+This is next-token loss on a **tight, structured** dataset, Gemini self-play plus filters that keep only episodes that *already* look like the economics I care about, deals that close well, refusals that are principled, responses that track drift. The **fast early drop** is the model nailing the *syntax* of the task, JSON, turn order, the tactical vocabulary, and the broad statistics of *what good play looks like* in the data. It is a **huge, low-entropy move** in loss space because “talk like a negotiator” is still far easier to learn than “negotiate optimally against a live grader”.
 
-The **shallower later segment** is not “we gave up on training” and in fact is the signature of a model that has *mostly* become a good maximum-likelihood imitator on a *fixed* set of trajectories. Imitation has a **ceiling** that is *below* the best achievable policy, because the dataset cannot contain every future shock, persona twist, or bluff. That is the entire reason the pipeline does not stop at SFT. You want the policy **on the manifold of valid play**; then you turn on **GRPO** to optimise the **verifiable** reward that the environment actually grades.
+The **shallower later segment** is not “I gave up on training” and in fact is the signature of a model that has *mostly* become a good maximum-likelihood imitator on a *fixed* set of trajectories. Imitation has a **ceiling** that is *below* the best achievable policy, because the dataset cannot contain every future shock, persona twist, or bluff. That is the entire reason the pipeline I built does not stop at SFT. I want the policy **on the manifold of valid play**; then I turn on **GRPO** to optimise the **verifiable** reward that the environment actually grades.
 
-**Bottom line:** a steep left and a soft right on this plot is *exactly* what you want before RL: **a cold start that is already fluent**, so the RL stage spends its budget *searching in useful directions* instead of fighting format errors and nonsense moves.
+**Bottom line:** a steep left and a soft right on this plot is *exactly* what I want before RL: **a cold start that is already fluent**, so the RL stage spends its budget *searching in useful directions* instead of fighting format errors and nonsense moves.
 
 ### GRPO: reward and loss, read like a pro
 
@@ -185,7 +185,7 @@ The GRPO run I ship is a **Hugging Face Job** configuration (L4, 80 steps, small
 
 **If you are waiting for a smooth exponential**, you are reading the wrong domain. Every batch is a *different* roll of personas, scenarios, and opponent noise; the group is only **G=2** completions. Some steps *will* go sideways. The signature of health is not silk-smooth monotonicity; it is a **wobbly** trace whose **envelope** shifts upward as the model learns to land on the high-reward side of the **ZOPA / ToM / format / anti-capitulation** composite. That is what “multi-objective policy gradient under a real environment” *looks* like in the log, honest variance instead of a fake curve fit.
 
-When the curve **flattens**, that is not automatically “stuck” either. It often means the policy has *stopped* doing the *catastrophically* bad moves that used to move the average a lot, so the **advantage** gets smaller, same story as late-stage RLHF, except our reward is a **grader** with cliffs and ToM, not a single human thumb up or down.
+When the curve **flattens**, that is not automatically “stuck” either. It often means the policy has *stopped* doing the *catastrophically* bad moves that used to move the average a lot, so the **advantage** gets smaller, same story as late-stage RLHF, except *my* reward is a **grader** with cliffs and ToM, not a single human thumb up or down.
 
 The **policy loss** in GRPO is a *second* read, and it is **not** a duplicate of the reward plot.
 
@@ -195,7 +195,7 @@ The **policy loss** in GRPO is a *second* read, and it is **not** a duplicate of
   <em><strong>Figure.</strong> The GRPO / PPO-style loss reflects ratios, clipping, and KL, not a single clean CE target — it can and does move in ways that look “wrong” when reward is still doing the right thing on average.</em>
 </p>
 
-The objective is **not** “minimise this line as if it were validation cross-entropy.” It is a constrained policy update: the loss can **bump** when the optimiser is **trading** off exploration, KL, and the group-relative return. I still watch it. If the reward trace is *systematically* flat or down while the loss explodes, that is a red flag, but a **divergent pair** in the *healthy* case is: reward asks “*where* in outcome space are we ending up?”, the loss asks “*how much* did the policy *move* from the SFT prior this step?”. Both matter; they are **not the same number**.
+The objective is **not** “minimise this line as if it were validation cross-entropy.” It is a constrained policy update: the loss can **bump** when the optimiser is **trading** off exploration, KL, and the group-relative return. I still watch it. If the reward trace is *systematically* flat or down while the loss explodes, that is a red flag, but a **divergent pair** in the *healthy* case is: reward asks “*where* in outcome space are the rollouts landing?”, the loss asks “*how much* did the policy *move* from the SFT prior this step?”. Both matter; they are **not the same number**.
 
 **One sentence I would put on a slide:** SFT is **fluency in the world of the deal**; GRPO is **pressure-testing that fluency under the only score that actually counts, the grader in the live loop.**
 
@@ -256,15 +256,15 @@ The human-as-teacher flywheel runs in both directions: human plays above the eff
 
 **The ToM term in GRPO training uses keyword proxies, not the full grader.** The full grader computes belief accuracy against hidden ground truth. This requires a grader call per rollout, which slows training. The GRPO reward function uses a faster utterance-level proxy. This is a deliberate tradeoff: the full grader runs during evaluation, the proxy runs during training.
 
-**Three scenarios is narrow.** The design supports certain fixed scenarios. If you want to add procurement, licensing, or real estate, the [scenario spec](https://github.com/sh4shv4t/parlay/blob/main/game/scenarios.py) is a clean dataclass. PRs welcome.
+**Three scenarios is narrow.** I started with a small fixed set of scenarios on purpose. If you want to add procurement, licensing, or real estate, the [scenario spec](https://github.com/sh4shv4t/parlay/blob/main/game/scenarios.py) is a clean dataclass. PRs welcome.
 
-**Training data diversity is the next frontier.** Right now the self-play data comes entirely from Gemini-vs-Gemini episodes. The plan is to broaden this significantly by firstly scraping real negotiation transcripts from publicly available sources (earnings call Q&As, recorded deal debriefs, negotiation case study databases) and supplementing with episodes generated by a mix of different models. A training set that includes how humans actually negotiate, not just how one LLM simulates negotiation, should produce meaningfully more robust agents. The scenario dataclass is designed to make this drop-in compatible.
+**Training data diversity is the next frontier.** Right now the self-play data comes entirely from Gemini-vs-Gemini episodes. **My plan** is to broaden this significantly by firstly scraping real negotiation transcripts from publicly available sources (earnings call Q&As, recorded deal debriefs, negotiation case study databases) and supplementing with episodes generated by a mix of different models. A training set that includes how humans actually negotiate, not just how one LLM simulates negotiation, should produce meaningfully more robust agents. I designed the scenario dataclass to make this drop-in compatible.
 
 ---
 
 ## What's Next
 
-The human-as-teacher flywheel is designed in which high-quality human plays (deal efficiency ≥ 0.60) should feed back into training data automatically. When that loop closes, the system gets better the more people play it.
+I designed the human-as-teacher flywheel so that high-quality human plays (deal efficiency ≥ 0.60) can feed back into training data automatically. When that loop closes, the system gets better the more people play it.
 
 The deeper research question: does the MEV inference layer which trains agents to reason about asymmetric exogenous shocks, produce negotiation agents that generalise better to novel scenarios? That's a paper-sized ablation study, and everything needed to run it is already in the repo.
 
@@ -272,7 +272,7 @@ The deeper research question: does the MEV inference layer which trains agents t
 
 ## References and Design Decisions
 
-Every mechanic in Parlay traces back to a specific paper. Here's the reading list, and why each one ended up in the codebase.
+Every mechanic in Parlay traces back to a specific paper. Here is the reading list, and why I put each one in the codebase.
 
 ### Nash (1950) — *The Bargaining Problem*, Econometrica 18(2):155–162
 
