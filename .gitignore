@@ -1,6 +1,9 @@
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
+*.pyc
+*.pyo
 *.pyo
 .Python
 build/
@@ -16,7 +19,9 @@ parlay.db
 telemetry.json
 data/
 models/
-results/
+results/*
+!results/eval_results.json
+!results/random_baseline.json
 
 # Environment
 .env

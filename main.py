@@ -112,6 +112,24 @@ async def serve_train_results() -> FileResponse:
     )
 
 
+@app.get("/judge", include_in_schema=False)
+async def serve_judge_demo() -> FileResponse:
+    """GRPO (trained) negotiator: same game UI with opponent forced to HF model."""
+    return FileResponse(
+        "dashboard/judge.html",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
+@app.get("/interact", include_in_schema=False)
+async def serve_interact() -> FileResponse:
+    """Direct model inference page — talk to the GRPO model without game scaffolding."""
+    return FileResponse(
+        "dashboard/interact.html",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
 @app.get("/favicon.ico", include_in_schema=False, response_model=None)
 async def favicon():
     """

@@ -1,0 +1,2 @@
+# Development tooling (optional)
+pre-commit>=3.7.0

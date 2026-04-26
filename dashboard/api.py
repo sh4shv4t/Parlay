@@ -101,6 +101,20 @@ class SetOpponentRequest(BaseModel):
     model: str  # "trained" | "gemini"
 
 
+class ModelChatMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    text: str
+
+
+class ModelChatRequest(BaseModel):
+    message: str
+    scenario_id: str = "saas_enterprise"
+    persona: str = "shark"
+    history: list[ModelChatMessage] = []
+    temperature: float = 0.7
+    max_tokens: int = 300
+
+
 def _get_tension(state: ParlayState, player_move: Optional[TacticalMove], opponent_move: Optional[TacticalMove]) -> float:
     base = 20.0 + ((state.step_count + 1) / MAX_TURNS) * 55.0
     if player_move == TacticalMove.ANCHOR_HIGH or opponent_move == TacticalMove.ANCHOR_HIGH:
@@ -345,6 +359,23 @@ def _training_status_payload() -> dict[str, Any]:
                 rnd = float(rnd)
         except Exception:  # noqa: BLE001
             has_results = False
+    if rnd is None and eval_path.is_file():
+        for baseline_path in (
+            _RESULTS_DIR / "random_baseline.json",
+            _RESULTS_DIR / "baseline.json",
+        ):
+            if not baseline_path.is_file():
+                continue
+            try:
+                blob = json.loads(baseline_path.read_text(encoding="utf-8"))
+                v = blob.get("mean_reward")
+                if v is None:
+                    v = blob.get("avg_reward")
+                if v is not None:
+                    rnd = float(v)
+                    break
+            except Exception:  # noqa: BLE001
+                continue
     repo = (os.environ.get("HF_MODEL_REPO") or "").strip() or None
 
     sft_loss_path: str | None = None
@@ -365,6 +396,14 @@ def _training_status_payload() -> dict[str, Any]:
     elif (_RESULTS_DIR / "grpo_loss_curve.png").is_file():
         grpo_loss_url = "/results/grpo_loss_curve.png"
 
+    comparison_url: str | None = None
+    if (_RESULTS_DIR / "training_curves.png").is_file():
+        comparison_url = "/results/training_curves.png"
+    elif (_IMAGES_DIR / "training_curves.png").is_file():
+        comparison_url = "/images/training_curves.png"
+    elif (_IMAGES_DIR / "comparison.png").is_file():
+        comparison_url = "/images/comparison.png"
+
     return {
         "has_results": has_results,
         "grpo_mean_reward": grpo,
@@ -375,10 +414,11 @@ def _training_status_payload() -> dict[str, Any]:
         "sft_loss_url": sft_loss_path,
         "grpo_reward_url": grpo_reward_url,
         "grpo_loss_url": grpo_loss_url,
+        "comparison_url": comparison_url,
         "plots_available": {
             "reward_curve": grpo_reward_url is not None,
             "grpo_loss": grpo_loss_url is not None,
-            "comparison": (_RESULTS_DIR / "training_curves.png").is_file(),
+            "comparison": comparison_url is not None,
             "transcript": (_RESULTS_DIR / "before_after_transcript.html").is_file(),
             "sft_loss": sft_loss_path is not None,
         },
@@ -389,6 +429,229 @@ def _training_status_payload() -> dict[str, Any]:
 async def get_training_status() -> dict:
     """Live stats and plot availability for the Training Results page."""
     return _training_status_payload()
+
+
+# Default model ID for docs / judge UI (see openenv.yaml grpo_model)
+GRPO_MODEL_REPO_DEFAULT = "sh4shv4t/parlay-grpo-1-5b"
+
+
+@router.get("/judge-config")
+async def get_judge_config() -> dict:
+    """
+    Status for the /judge page: whether Hub weights are configured and current opponent mode.
+    """
+    repo = (os.environ.get("HF_MODEL_REPO") or "").strip() or None
+    return {
+        "hf_model_configured": bool(repo),
+        "model_repo": repo,
+        "suggested_grpo_repo": GRPO_MODEL_REPO_DEFAULT,
+        "opponent_mode": OPPONENT_MODE,
+    }
+
+
+@router.get("/model/info")
+async def model_info() -> dict:
+    """
+    Status + metadata for the /interact page.
+    Reports whether the GRPO Hub model is reachable and what repo is configured.
+    """
+    repo = (os.environ.get("HF_MODEL_REPO") or "").strip() or None
+    fallback_repo = GRPO_MODEL_REPO_DEFAULT
+    hub_url = f"https://huggingface.co/{repo or fallback_repo}"
+    return {
+        "configured": bool(repo),
+        "model_repo": repo or fallback_repo,
+        "hub_url": hub_url,
+        "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+        "training": "GRPO (TRL) on Parlay negotiation self-play episodes",
+        "note": (
+            "Model outputs structured JSON: utterance, optional offer_amount, optional tactical_move."
+            if repo
+            else (
+                "HF_MODEL_REPO is not set — using the public fallback repo. "
+                "Set HF_MODEL_REPO in Space secrets to enable local GPU inference."
+            )
+        ),
+    }
+
+
+def _build_interact_system_prompt(scenario_id: str, persona: str) -> str:
+    """Lightweight system prompt for the /interact page (no live game state)."""
+    from agent.personas import PERSONAS
+    from parlay_env.models import PersonaType
+
+    try:
+        pt = PersonaType(persona)
+    except ValueError:
+        pt = PersonaType.SHARK
+    cfg = PERSONAS[pt]
+
+    sc = get_scenario(scenario_id)
+    mid = (sc.batna_seller + sc.batna_buyer) / 2
+
+    return (
+        f"You are {cfg.name} ({cfg.emoji}), an experienced negotiator.\n\n"
+        f"SCENARIO: {sc.title}\n"
+        f"{sc.description}\n"
+        f"The deal range is roughly {sc.batna_seller:,.0f}–{sc.batna_buyer:,.0f} {sc.currency}.\n"
+        f"You are negotiating from the opposing side, targeting around {mid:,.0f}.\n\n"
+        f"YOUR STYLE:\n{cfg.style}\n\n"
+        "RULES:\n"
+        "- Stay in character at all times.\n"
+        '- Respond ONLY with valid JSON: {"utterance": "...", "offer_amount": <number or null>, "tactical_move": <string or null>}\n'
+        "- Keep utterances under 100 words.\n"
+    )
+
+
+async def _run_hf_inference(
+    system_prompt: str,
+    history: list[ModelChatMessage],
+    message: str,
+    temperature: float,
+    max_tokens: int,
+) -> dict[str, Any]:
+    """Load the Hub model (via hf_opponent._sync_generate) and run inference."""
+    from agent.hf_opponent import _sync_generate, _get_lock, _build_prompt, _parse_json_block  # noqa: PLC0415
+
+    messages = []
+    for h in history:
+        role = "user" if h.role == "user" else "model"
+        messages.append({"role": role, "parts": [h.text]})
+    messages.append({"role": "user", "parts": [message]})
+
+    loop = asyncio.get_event_loop()
+
+    repo = (os.environ.get("HF_MODEL_REPO") or "").strip() or GRPO_MODEL_REPO_DEFAULT
+    os.environ.setdefault("HF_MODEL_REPO", repo)
+
+    result = await loop.run_in_executor(
+        None,
+        lambda: _sync_generate(system_prompt, messages, min(max_tokens, 512)),
+    )
+    return result
+
+
+async def _run_hf_api_inference(
+    system_prompt: str,
+    history: list[ModelChatMessage],
+    message: str,
+    temperature: float,
+    max_tokens: int,
+    repo: str,
+) -> dict[str, Any]:
+    """
+    Call the HF Inference API for the given repo.
+    Tries the new /v1/chat/completions endpoint first, then falls back to the
+    legacy text-generation endpoint.
+    """
+    import httpx  # noqa: PLC0415
+    from agent.hf_opponent import _parse_json_block  # noqa: PLC0415
+
+    token = os.environ.get("HF_TOKEN", "")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    # Build chat messages for /v1/chat/completions
+    chat_msgs = [{"role": "system", "content": system_prompt}]
+    for h in history:
+        chat_msgs.append({"role": h.role, "content": h.text})
+    chat_msgs.append({"role": "user", "content": message})
+
+    url = f"https://api-inference.huggingface.co/models/{repo}/v1/chat/completions"
+    payload = {
+        "model": repo,
+        "messages": chat_msgs,
+        "max_tokens": min(max_tokens, 512),
+        "temperature": temperature,
+    }
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        if resp.status_code == 200:
+            data = resp.json()
+            raw = data["choices"][0]["message"]["content"]
+            return _parse_json_block(raw)
+        # Legacy text-generation endpoint
+        legacy_url = f"https://api-inference.huggingface.co/models/{repo}"
+        # Format as ChatML for Qwen
+        eot = "<|im_end|>"
+        prompt_parts = [f"<|im_start|>system\n{system_prompt}\n{eot}\n"]
+        for h in history:
+            r = "user" if h.role == "user" else "assistant"
+            prompt_parts.append(f"<|im_start|>{r}\n{h.text}\n{eot}\n")
+        prompt_parts.append(f"<|im_start|>user\n{message}\n{eot}\n")
+        prompt_parts.append(
+            "<|im_start|>assistant\n"
+            'Respond ONLY with valid JSON: {"utterance": "...", "offer_amount": <number or null>, "tactical_move": <string or null>}\n'
+        )
+        legacy_payload = {
+            "inputs": "".join(prompt_parts),
+            "parameters": {"max_new_tokens": min(max_tokens, 256), "temperature": temperature, "return_full_text": False},
+        }
+        resp2 = await client.post(legacy_url, json=legacy_payload, headers=headers)
+        resp2.raise_for_status()
+        data2 = resp2.json()
+        raw2 = data2[0]["generated_text"] if isinstance(data2, list) else str(data2)
+        return _parse_json_block(raw2)
+
+
+@router.post("/model/chat")
+async def model_chat(req: ModelChatRequest) -> dict:
+    """
+    Direct inference against the GRPO-finetuned negotiation model.
+    Used by the /interact page for free-form chat with the model.
+    Strategy:
+      1. If torch + model weights are loadable locally (GPU Space), load and run.
+      2. Otherwise hit the HF Inference API (works on CPU Spaces, may have cold-start).
+    """
+    try:
+        scenario = get_scenario(req.scenario_id)
+    except InvalidScenarioError:
+        raise HTTPException(status_code=400, detail=f"Unknown scenario: {req.scenario_id!r}")
+
+    valid_personas = {"shark", "diplomat", "veteran"}
+    if req.persona not in valid_personas:
+        raise HTTPException(status_code=400, detail=f"Unknown persona: {req.persona!r}")
+
+    system_prompt = _build_interact_system_prompt(req.scenario_id, req.persona)
+    repo = (os.environ.get("HF_MODEL_REPO") or "").strip() or GRPO_MODEL_REPO_DEFAULT
+
+    # Attempt 1 — local model (fast on GPU Spaces, slow on CPU)
+    try:
+        import torch  # noqa: PLC0415
+        result = await _run_hf_inference(
+            system_prompt, req.history, req.message, req.temperature, req.max_tokens
+        )
+        return {
+            "utterance": result.get("utterance", ""),
+            "offer_amount": result.get("offer_amount"),
+            "tactical_move": result.get("tactical_move"),
+            "backend": "local",
+            "model_repo": repo,
+        }
+    except Exception as local_exc:
+        logger.info("Local inference unavailable, trying HF API: %s", local_exc)
+
+    # Attempt 2 — HF Inference API (no GPU needed)
+    try:
+        result = await _run_hf_api_inference(
+            system_prompt, req.history, req.message, req.temperature, req.max_tokens, repo
+        )
+        return {
+            "utterance": result.get("utterance", ""),
+            "offer_amount": result.get("offer_amount"),
+            "tactical_move": result.get("tactical_move"),
+            "backend": "hf_api",
+            "model_repo": repo,
+        }
+    except Exception as api_exc:
+        logger.warning("HF API inference failed: %s", api_exc)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Model inference failed on both local and HF API backends. "
+                f"Model: {repo}. Error: {api_exc}"
+            ),
+        )
 
 
 @router.post("/set-opponent")

@@ -1,5 +1,9 @@
 # ◈ Parlay — I Built an AI That Finally Beats Me at Negotiation
 
+<p align="center">
+  <img src="images/Parlay_square%20logo.png" alt="Parlay logo" width="220">
+</p>
+
 *Teaching language models to close deals under hidden information, bluffing, and a world that doesn't stand still.*
 
 ---
@@ -129,6 +133,8 @@ No prior negotiation RL paper has this layer.
 ---
 
 ## Training Pipeline
+
+**Google Colab:** [parlay_sft_colab](https://colab.research.google.com/drive/1x5uZMbdKF7XeDNm-bM5YSPdpd1srgArA?usp=sharing) · [parlay_grpo_hf_job](https://colab.research.google.com/drive/1DNYogmRlR_YJrEO6GN3YC7xj8lfycDuL?usp=sharing) (in-repo: [`training/notebooks/parlay_sft_colab.ipynb`](https://github.com/sh4shv4t/Parlay/blob/main/training/notebooks/parlay_sft_colab.ipynb), plus [`training/GRPO_HF_RUNBOOK.md`](https://github.com/sh4shv4t/Parlay/blob/main/training/GRPO_HF_RUNBOOK.md) / `scripts/hf_grpo_entry.sh` for the job-style GRPO run).
 
 ```text
 Gemini self-play (generate_data.py)

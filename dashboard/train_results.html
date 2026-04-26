@@ -77,15 +77,6 @@
     }
     .fig-placeholder a { color: var(--gold); }
     .caption { font-size: 0.9rem; color: var(--smoke); margin-top: 0.5rem; }
-    .transcript-box {
-      max-height: 500px; overflow-y: auto;
-      background: var(--mahogany);
-      border: 1px solid var(--gold);
-      padding: 1rem; border-radius: 4px;
-    }
-    .transcript-box::-webkit-scrollbar { width: 8px; }
-    .transcript-box::-webkit-scrollbar-track { background: var(--felt); }
-    .transcript-box::-webkit-scrollbar-thumb { background: #4a3d28; border-radius: 4px; }
     .hub-card {
       border: 2px solid var(--gold); background: var(--mahogany);
       padding: 1.25rem; border-radius: 4px;
@@ -105,11 +96,28 @@
       background: var(--felt); padding: 1rem; border-radius: 3px; overflow-x: auto; }
     a.back { color: var(--smoke); text-decoration: none; font-size: 0.9rem; }
     a.back:hover { color: var(--gold); }
+    .read-block {
+      background: var(--mahogany);
+      border: 1px solid rgba(201, 168, 76, 0.35);
+      border-radius: 4px; padding: 1rem 1.15rem; margin-top: 0.9rem;
+      font-size: 0.95rem; line-height: 1.45; color: var(--cream);
+    }
+    .read-block h3 {
+      font-family: var(--font-display); color: var(--gold); font-size: 1.02rem; margin: 0 0 0.4rem 0; font-style: italic;
+    }
+    .read-block p { margin: 0 0 0.65rem 0; }
+    .read-block p:last-child { margin-bottom: 0; }
   </style>
 </head>
 <body>
   <div class="page">
-    <p><a class="back" href="/">← Back to the Deal Room</a></p>
+    <p>
+      <a class="back" href="/">← Deal Room</a>
+      &ensp;·&ensp;
+      <a class="back" href="/interact">Talk to the Model</a>
+      &ensp;·&ensp;
+      <a class="back" href="/judge">GRPO demo</a>
+    </p>
 
     <header>
       <h1>◈ Training Results</h1>
@@ -119,13 +127,14 @@
 
     <section>
       <h2>Key Numbers</h2>
+      <p class="caption" style="margin:0 0 0.75rem 0">Mean episode reward for the same eval protocol: random play, the frozen base (instruction) model, and your GRPO model.</p>
       <div class="card-row" id="key-numbers">
         <div class="num-card">
-          <h3>Random Baseline</h3>
+          <h3>Random baseline</h3>
           <div class="val scar" id="k-random">—</div>
         </div>
         <div class="num-card">
-          <h3>Base Model</h3>
+          <h3>Base model</h3>
           <div class="val smoke" id="k-base">—</div>
         </div>
         <div class="num-card">
@@ -161,8 +170,19 @@
     </section>
 
     <section>
-      <h2>What Changed: Base Model vs Trained Agent</h2>
-      <div id="transcript-container"></div>
+      <h2>What you are seeing (and what compute unlocks next)</h2>
+      <div class="read-block">
+        <h3>SFT loss</h3>
+        <p>Supervised training usually shows a clear downward trend early, then a gentler slope as the model matches the Parlay format and tone. A flatter tail often means the model is close to the local optimum for that data — not that learning has “stopped” entirely.</p>
+        <h3>GRPO mean reward</h3>
+        <p>Policy-gradient training optimizes a noisy signal: each batch samples different episodes and rollouts, so the curve wiggles. Uptrends mean the value head and policy are moving toward higher rewards on average. Plateaus are common when the policy hits a local policy and the advantage estimates shrink.</p>
+        <h3>GRPO training loss</h3>
+        <p>Unlike SFT, this is not a simple cross-entropy to a single target. Loss can bump around while reward improves because the loss reflects ratios, clipping, and changing baselines, not just “closer to data.”</p>
+        <h3>Random vs base vs trained</h3>
+        <p>Random play anchors the scale: it shows what unstructured actions score under the same reward. The base model (before GRPO) reflects instruction-following without RL shaping; GRPO should lift the mean if the environment signal is learnable. Gaps that look small in absolute value can still be meaningful when rewards mix sparse bonuses and penalties.</p>
+        <h3>Compute</h3>
+        <p>We ran a compact schedule (1.5B + LoRA, modest generations per step) to keep iteration fast. With more budget, the same stack could support longer rollouts, higher group size for less noisy advantage estimates, or additional GRPO steps to see whether reward plateaus or keeps climbing — and full fine-tuning if we wanted to stress capacity over adapters.</p>
+      </div>
     </section>
 
     <section>
@@ -192,9 +212,9 @@
     function renderStatus(data) {
       const badge = document.getElementById("status-badge");
       if (data.model_on_hub) {
-        badge.innerHTML = '<span class="badge ok">Model on Hub</span>';
+        badge.innerHTML = '<span class="badge ok">In-app: trained model ready</span>';
       } else {
-        badge.innerHTML = '<span class="badge wait">Training not yet run</span>';
+        badge.innerHTML = '<span class="badge wait">Hub checkpoint is live; set <code>HF_MODEL_REPO</code> for the trained in-app opponent</span>';
       }
     }
     function renderKeyNumbers(data) {
@@ -246,38 +266,28 @@
         cap.hidden = true;
       }
     }
-    function compareSection(pa) {
+    function compareSection(data) {
       const el = document.getElementById("fig-compare");
       const cap = document.getElementById("cap-compare");
-      if (pa.comparison) {
-        el.innerHTML = '<img src="/results/training_curves.png" alt="Comparison" style="width:100%;border:1px solid var(--gold);border-radius:2px" />';
+      const url = data.comparison_url;
+      if (url) {
+        el.innerHTML = '<img src="' + url + '" alt="Random vs Base vs GRPO comparison" style="width:100%;border:1px solid var(--gold);border-radius:2px" />';
         cap.hidden = false;
       } else {
-        el.innerHTML = '<div class="fig-placeholder">Four-bar chart will appear after evaluation.</div>';
+        el.innerHTML = '<div class="fig-placeholder">Four-bar chart: add <code>images/training_curves.png</code> (or <code>results/training_curves.png</code>) or run eval to generate a comparison.</div>';
         cap.hidden = true;
-      }
-    }
-    async function transcriptSection(pa) {
-      const c = document.getElementById("transcript-container");
-      if (pa.transcript) {
-        try {
-          const res = await fetch("/results/before_after_transcript.html", { cache: "no-cache" });
-          const html = await res.text();
-          c.innerHTML = '<div class="transcript-box">' + html + '</div>';
-        } catch (e) {
-          c.innerHTML = '<div class="fig-placeholder">Could not load transcript.</div>';
-        }
-      } else {
-        c.innerHTML = '<div class="fig-placeholder">Transcript comparison will appear after evaluation run.</div>';
       }
     }
     function hubSection(data) {
       const h = document.getElementById("hub-block");
+      const hubUrl = "https://huggingface.co/sh4shv4t/parlay-grpo-1-5b";
+      const hubName = "sh4shv4t/parlay-grpo-1-5b";
       if (data.model_on_hub) {
         h.innerHTML =
           '<div class="hub-card">' +
-          '<p><strong>Trained model available on Hugging Face Hub</strong></p>' +
-          '<p><a href="https://huggingface.co/sh4shv4t/parlay-negotiator" target="_blank" rel="noopener">→ sh4shv4t/parlay-negotiator</a></p>' +
+          '<p><strong>Trained model on Hugging Face Hub</strong></p>' +
+          '<p><a href="' + hubUrl + '" target="_blank" rel="noopener">→ ' + hubName + '</a></p>' +
+          '<p class="caption" style="color:var(--smoke)">GRPO LoRA on Qwen2.5-1.5B (Parlay episodes).</p>' +
           '<button type="button" class="btn-gold" id="btn-try-trained">→ Play against the trained model</button>' +
           '</div>';
         document.getElementById("btn-try-trained").addEventListener("click", async () => {
@@ -293,9 +303,10 @@
         });
       } else {
         h.innerHTML =
-          '<div class="hub-card muted">' +
-          '<p>Model will be pushed to Hub after training completes.</p>' +
-          '<p style="color:var(--smoke)">huggingface.co/sh4shv4t/parlay-negotiator</p>' +
+          '<div class="hub-card">' +
+          '<p><strong>Trained model on Hugging Face Hub</strong></p>' +
+          '<p><a href="' + hubUrl + '" target="_blank" rel="noopener">→ ' + hubName + '</a></p>' +
+          '<p class="caption" style="color:var(--smoke)">The checkpoint is live. To use it as the opponent in this app, set the server env <code>HF_MODEL_REPO</code> to <code>' + hubName + '</code> (Hugging Face Spaces: Secrets), then use the play button on the home page after switching the opponent.</p>' +
           '</div>';
       }
     }
@@ -311,8 +322,7 @@
         sftSection(data.sft_loss_url);
         rewardSection(data.grpo_reward_url);
         grpoLossSection(data.grpo_loss_url);
-        compareSection(data.plots_available);
-        await transcriptSection(data.plots_available);
+        compareSection(data);
         hubSection(data);
       } catch (e) {
         document.getElementById("status-badge").innerHTML = '<span class="badge wait">Could not load status</span>';

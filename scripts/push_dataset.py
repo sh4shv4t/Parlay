@@ -76,7 +76,7 @@ deal_efficiency, tom_accuracy, drift_adapted
 [Space](https://huggingface.co/spaces/sh4shv4t/Parlay) |
 [GitHub](https://github.com/sh4shv4t/Parlay) |
 [SFT Model](https://huggingface.co/sh4shv4t/parlay-sft-1-5b) |
-[Blog](https://huggingface.co/blog/sh4shv4t/parlay)
+[Blog](https://github.com/sh4shv4t/Parlay/blob/main/BLOG.md)
 """
     with tempfile.NamedTemporaryFile(
         mode="w",

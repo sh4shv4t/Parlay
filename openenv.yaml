@@ -17,7 +17,7 @@ license: "MIT"
 # URLs — judges pull the env from space_url
 space_url: "https://huggingface.co/spaces/sh4shv4t/Parlay"
 repository: "https://github.com/sh4shv4t/Parlay"
-blog: "https://huggingface.co/blog/sh4shv4t/parlay"
+blog: "https://github.com/sh4shv4t/Parlay/blob/main/BLOG.md"
 dataset: "https://huggingface.co/datasets/sh4shv4t/parlay-episodes"
 sft_model: "https://huggingface.co/sh4shv4t/parlay-sft-1-5b"
 grpo_model: "https://huggingface.co/sh4shv4t/parlay-grpo-1-5b"

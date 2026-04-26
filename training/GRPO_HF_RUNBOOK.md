@@ -140,7 +140,7 @@ GRPO already **builds charts in code** (`training/grpo_train.py` → `_save_trai
 
 ## 4. Alternative: Colab (no Jobs)
 
-Use `notebooks/parlay_grpo_colab.ipynb`. In the **config** cell, set:
+Use `training/notebooks/parlay_grpo_colab.ipynb`. In the **config** cell, set:
 
 ```python
 JSONL_VIA_HF = ("sh4shv4t/parlay-episodes", "episodes_v2.jsonl")

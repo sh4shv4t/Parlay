@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Parlay — Talk to the Model</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg?v=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=EB+Garamond:ital,wght@0,400;0,500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Design tokens (same as train_results.html) ────────────────────────── */
+    :root {
+      --felt:           #1c2b1a;
+      --felt-light:     #2a3d28;
+      --mahogany:       #2c1810;
+      --mahogany-light: #3d2518;
+      --cream:          #f5f0e8;
+      --gold:           #c9a84c;
+      --smoke:          #8a8070;
+      --ink:            #1a1208;
+      --scarlet:        #8b1a1a;
+      --emerald:        #1a5c2a;
+      --ivory:          #faf6ee;
+      --red-accent:     #c0392b;
+      --green-accent:   #27ae60;
+      --font-display:   "Playfair Display", Georgia, serif;
+      --font-body:      "EB Garamond", Georgia, serif;
+      --font-mono:      "DM Mono", "Courier New", monospace;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      font-family: var(--font-body); font-size: 1rem;
+      color: var(--cream); background: var(--felt);
+      background-image:
+        repeating-linear-gradient(45deg,
+          rgba(255,255,255,0.018) 0, rgba(255,255,255,0.018) 1px,
+          transparent 1px, transparent 6px);
+    }
+
+    /* ── Page shell ───────────────────────────────────────────────────────── */
+    .page { max-width: 820px; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
+    a.back {
+      color: var(--smoke); text-decoration: none; font-size: 0.9rem;
+      display: inline-flex; align-items: center; gap: 4px; margin-bottom: 1.5rem;
+    }
+    a.back:hover { color: var(--gold); }
+    h1 {
+      font-family: var(--font-display); color: var(--gold);
+      font-size: 2rem; font-style: italic; font-weight: 600;
+      margin: 0 0 0.4rem 0;
+    }
+    .subtitle { color: var(--smoke); font-size: 1.05rem; margin: 0 0 0.9rem; }
+    h2 {
+      font-family: var(--font-display); color: var(--gold); font-size: 1.3rem;
+      font-weight: 600; border-bottom: 1px solid rgba(201,168,76,0.3);
+      padding-bottom: 0.3rem; margin: 0 0 0.9rem;
+    }
+    section { margin-top: 2rem; }
+
+    /* ── Status badge ─────────────────────────────────────────────────────── */
+    .badge {
+      display: inline-block; padding: 4px 12px; border-radius: 4px;
+      font-size: 0.75rem; font-family: var(--font-mono); letter-spacing: 0.06em;
+    }
+    .badge.ok   { background: #1a3d22; color: #a8d4b0; border: 1px solid var(--emerald); }
+    .badge.warn { background: #3a3018; color: #e8d49a; border: 1px solid var(--gold); }
+    .badge.err  { background: #3d1010; color: #e8a0a0; border: 1px solid var(--scarlet); }
+
+    /* ── Model info card ──────────────────────────────────────────────────── */
+    .model-info-card {
+      background: var(--mahogany); border: 1px solid rgba(201,168,76,0.4);
+      border-radius: 4px; padding: 1rem 1.25rem;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem 1.5rem;
+    }
+    @media (max-width: 560px) { .model-info-card { grid-template-columns: 1fr; } }
+    .info-row { display: flex; flex-direction: column; gap: 2px; }
+    .info-label {
+      font-family: var(--font-mono); font-size: 0.68rem;
+      text-transform: uppercase; letter-spacing: 0.1em; color: var(--smoke);
+    }
+    .info-val { font-size: 0.9rem; color: var(--cream); word-break: break-all; }
+    .info-val a { color: var(--gold); text-decoration: none; }
+    .info-val a:hover { text-decoration: underline; }
+
+    /* ── Context pickers ──────────────────────────────────────────────────── */
+    .context-row {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+      margin-bottom: 1.2rem;
+    }
+    @media (max-width: 560px) { .context-row { grid-template-columns: 1fr; } }
+    .context-group { display: flex; flex-direction: column; gap: 0.35rem; }
+    .context-group label {
+      font-family: var(--font-mono); font-size: 0.7rem;
+      text-transform: uppercase; letter-spacing: 0.1em; color: var(--smoke);
+    }
+    select {
+      background: var(--mahogany-light); border: 1px solid rgba(201,168,76,0.35);
+      color: var(--cream); font-family: var(--font-body); font-size: 0.95rem;
+      padding: 8px 10px; border-radius: 3px; width: 100%; cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23c9a84c' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 10px center;
+    }
+    select:focus { outline: 1px solid var(--gold); }
+
+    /* ── Chat window ──────────────────────────────────────────────────────── */
+    .chat-window {
+      background: var(--mahogany); border: 1px solid rgba(201,168,76,0.3);
+      border-radius: 4px; min-height: 340px; max-height: 480px;
+      overflow-y: auto; padding: 1rem; display: flex; flex-direction: column;
+      gap: 0.75rem; margin-bottom: 0.9rem;
+      scroll-behavior: smooth;
+    }
+    .chat-window:empty::after {
+      content: "Choose a scenario and persona above, then type a message to begin.";
+      color: var(--smoke); font-style: italic; font-size: 0.95rem;
+      margin: auto;
+    }
+
+    /* message bubbles */
+    .msg { display: flex; flex-direction: column; max-width: 82%; }
+    .msg.user  { align-self: flex-end; align-items: flex-end; }
+    .msg.model { align-self: flex-start; align-items: flex-start; }
+    .msg.system { align-self: center; align-items: center; max-width: 100%; }
+
+    .msg-role {
+      font-family: var(--font-mono); font-size: 0.65rem;
+      text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--smoke); margin-bottom: 2px;
+    }
+    .msg-body {
+      padding: 0.65rem 0.9rem; border-radius: 4px;
+      font-size: 0.97rem; line-height: 1.5;
+    }
+    .msg.user  .msg-body { background: #2d4030; border: 1px solid rgba(201,168,76,0.25); }
+    .msg.model .msg-body {
+      background: var(--mahogany-light); border: 1px solid rgba(201,168,76,0.4);
+    }
+    .msg.system .msg-body {
+      background: transparent; border: none;
+      color: var(--smoke); font-style: italic; font-size: 0.88rem; text-align: center;
+    }
+    /* offer chip inside model bubble */
+    .offer-chip {
+      display: inline-block; margin-top: 0.45rem;
+      background: rgba(201,168,76,0.15); border: 1px solid var(--gold);
+      color: var(--gold); font-family: var(--font-mono); font-size: 0.75rem;
+      padding: 2px 10px; border-radius: 3px;
+    }
+    .tactic-pill {
+      display: inline-block; margin-top: 0.35rem; margin-left: 0.4rem;
+      background: rgba(139,26,26,0.25); border: 1px solid var(--scarlet);
+      color: #e0a0a0; font-family: var(--font-mono); font-size: 0.68rem;
+      padding: 2px 8px; border-radius: 3px; text-transform: uppercase;
+    }
+    /* thinking pulse */
+    .thinking .msg-body { opacity: 0.65; }
+    .dot-pulse {
+      display: inline-flex; gap: 4px; align-items: center; padding: 2px 0;
+    }
+    .dot-pulse span {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--gold);
+      animation: pulse 1.2s infinite ease-in-out;
+    }
+    .dot-pulse span:nth-child(2) { animation-delay: 0.2s; }
+    .dot-pulse span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes pulse { 0%,80%,100% { opacity: 0.2; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+
+    /* ── Input bar ────────────────────────────────────────────────────────── */
+    .input-bar { display: flex; gap: 0.65rem; }
+    .chat-input {
+      flex: 1; background: var(--mahogany-light);
+      border: 1px solid rgba(201,168,76,0.35);
+      color: var(--cream); font-family: var(--font-body); font-size: 1rem;
+      padding: 10px 14px; border-radius: 3px; resize: none; min-height: 44px;
+    }
+    .chat-input:focus { outline: 1px solid var(--gold); }
+    .chat-input::placeholder { color: var(--smoke); }
+    .btn-gold {
+      background: var(--gold); color: var(--ink);
+      border: none; padding: 10px 20px;
+      font-family: var(--font-mono); font-size: 0.85rem;
+      cursor: pointer; border-radius: 3px; font-weight: 500;
+      white-space: nowrap; align-self: flex-end;
+    }
+    .btn-gold:hover { filter: brightness(1.08); }
+    .btn-gold:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+    .btn-ghost {
+      background: none; border: 1px solid rgba(201,168,76,0.35);
+      color: var(--smoke); padding: 8px 14px; border-radius: 3px;
+      font-family: var(--font-mono); font-size: 0.8rem; cursor: pointer;
+    }
+    .btn-ghost:hover { border-color: var(--gold); color: var(--gold); }
+
+    /* ── Footer toolbar under chat ────────────────────────────────────────── */
+    .chat-toolbar {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-top: 0.55rem;
+    }
+    .char-hint { font-family: var(--font-mono); font-size: 0.7rem; color: var(--smoke); }
+    .backend-tag { font-family: var(--font-mono); font-size: 0.68rem; color: var(--smoke); }
+    .backend-tag span { color: var(--gold); }
+
+    /* ── Error box ────────────────────────────────────────────────────────── */
+    .error-box {
+      background: #3d1010; border: 1px solid var(--scarlet);
+      border-radius: 4px; padding: 0.75rem 1rem;
+      color: #e8a0a0; font-size: 0.9rem; display: none;
+    }
+
+    /* ── Explainer read-block (mirrors train_results) ─────────────────────── */
+    .read-block {
+      background: var(--mahogany); border: 1px solid rgba(201,168,76,0.28);
+      border-radius: 4px; padding: 1rem 1.15rem; margin-top: 0.8rem;
+      font-size: 0.95rem; line-height: 1.5; color: var(--cream);
+    }
+    .read-block h3 {
+      font-family: var(--font-display); color: var(--gold);
+      font-size: 1rem; margin: 0 0 0.4rem; font-style: italic;
+    }
+    .read-block p { margin: 0 0 0.6rem; }
+    .read-block p:last-child { margin-bottom: 0; }
+    .read-block code {
+      font-family: var(--font-mono); font-size: 0.82rem;
+      background: rgba(255,255,255,0.07); padding: 1px 5px; border-radius: 2px;
+    }
+
+    /* ── JSON viewer (collapsible raw output) ─────────────────────────────── */
+    details.raw-output {
+      background: var(--mahogany); border: 1px solid rgba(201,168,76,0.2);
+      border-radius: 4px; padding: 0 1rem; margin-top: 0.5rem;
+    }
+    details.raw-output summary {
+      cursor: pointer; color: var(--smoke); padding: 0.6rem 0;
+      font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    details.raw-output pre {
+      font-family: var(--font-mono); font-size: 0.78rem; color: var(--cream);
+      background: var(--felt); padding: 0.75rem; border-radius: 3px;
+      overflow-x: auto; margin: 0 0 0.75rem;
+    }
+
+    /* ── Temperature control ──────────────────────────────────────────────── */
+    .param-row {
+      display: flex; align-items: center; gap: 0.75rem;
+      margin-top: 0.9rem;
+    }
+    .param-row label {
+      font-family: var(--font-mono); font-size: 0.7rem;
+      text-transform: uppercase; letter-spacing: 0.08em; color: var(--smoke);
+      white-space: nowrap;
+    }
+    input[type="range"] {
+      flex: 1; accent-color: var(--gold); cursor: pointer;
+    }
+    .param-val {
+      font-family: var(--font-mono); font-size: 0.82rem; color: var(--gold);
+      min-width: 28px; text-align: right;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+
+    <p><a class="back" href="/">← Back to the Deal Room</a></p>
+
+    <header>
+      <h1>◈ Talk to the Model</h1>
+      <p class="subtitle">Direct inference with the GRPO-finetuned negotiator (Qwen2.5-1.5B)</p>
+      <p id="status-badge"></p>
+    </header>
+
+    <!-- Model info ──────────────────────────────────────────────────────── -->
+    <section>
+      <h2>Model</h2>
+      <div class="model-info-card" id="model-info-card">
+        <div class="info-row"><span class="info-label">Repo</span><span class="info-val" id="info-repo">—</span></div>
+        <div class="info-row"><span class="info-label">Base</span><span class="info-val" id="info-base">—</span></div>
+        <div class="info-row"><span class="info-label">Training</span><span class="info-val" id="info-training">—</span></div>
+        <div class="info-row"><span class="info-label">Output format</span><span class="info-val" id="info-note">—</span></div>
+      </div>
+    </section>
+
+    <!-- Chat interface ───────────────────────────────────────────────────── -->
+    <section>
+      <h2>Chat</h2>
+
+      <!-- Context pickers -->
+      <div class="context-row">
+        <div class="context-group">
+          <label for="sel-scenario">Scenario (gives the model context)</label>
+          <select id="sel-scenario">
+            <option value="saas_enterprise">Enterprise SaaS Contract — $125k–$165k ACV</option>
+            <option value="hiring_package">Senior Engineer Offer — $195k–$265k total comp</option>
+            <option value="acquisition_term_sheet">Startup Acquisition — $10.5M–$16M valuation</option>
+          </select>
+        </div>
+        <div class="context-group">
+          <label for="sel-persona">Persona (model negotiating style)</label>
+          <select id="sel-persona">
+            <option value="shark">🦈 The Shark — aggressive, anchors hard</option>
+            <option value="diplomat">🤝 The Diplomat — collaborative, reveals constraints</option>
+            <option value="veteran">🧓 The Veteran — strategic silence, k=2 ToM</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Temperature -->
+      <div class="param-row">
+        <label for="temp-slider">Temperature</label>
+        <input type="range" id="temp-slider" min="0.1" max="1.4" step="0.05" value="0.7" />
+        <span class="param-val" id="temp-val">0.7</span>
+        <button class="btn-ghost" id="btn-reset-chat" title="Start a new conversation">New chat</button>
+      </div>
+
+      <!-- Window -->
+      <div class="chat-window" id="chat-window" role="log" aria-live="polite" aria-label="Conversation with the model"></div>
+
+      <!-- Error -->
+      <div class="error-box" id="error-box"></div>
+
+      <!-- Input -->
+      <div class="input-bar">
+        <textarea
+          id="chat-input"
+          class="chat-input"
+          rows="1"
+          placeholder="Type your opening offer or message…"
+          aria-label="Your message"
+        ></textarea>
+        <button class="btn-gold" id="btn-send" type="button">Send</button>
+      </div>
+
+      <div class="chat-toolbar">
+        <span class="char-hint">Enter to send · Shift+Enter for new line</span>
+        <span class="backend-tag" id="backend-tag"></span>
+      </div>
+
+      <!-- Last raw output -->
+      <details class="raw-output" id="raw-details" style="display:none;">
+        <summary>Raw model JSON output</summary>
+        <pre id="raw-pre"></pre>
+      </details>
+    </section>
+
+    <!-- About the model ─────────────────────────────────────────────────── -->
+    <section>
+      <h2>About this model</h2>
+      <div class="read-block">
+        <h3>What it is</h3>
+        <p>
+          <strong>parlay-grpo-1-5b</strong> is a Qwen2.5-1.5B-Instruct model fine-tuned in two
+          stages: first with SFT on Gemini-generated negotiation transcripts, then with GRPO using
+          the Parlay reward function — a mix of ZOPA progress, Theory-of-Mind accuracy, tactical
+          card usage, and drift adaptation bonuses.
+        </p>
+        <h3>What it outputs</h3>
+        <p>
+          Every response is a JSON object with three fields:<br/>
+          <code>utterance</code> — the natural language negotiation turn,<br/>
+          <code>offer_amount</code> — a numeric bid (or <code>null</code> for conversational turns),<br/>
+          <code>tactical_move</code> — optional card played (<code>anchor_high</code>, <code>batna_reveal</code>, <code>silence</code>).
+        </p>
+        <h3>How to read the responses here</h3>
+        <p>
+          The <em>utterance</em> is displayed as the chat bubble. If the model includes an
+          <em>offer_amount</em>, it appears as a gold chip below the text. You can expand
+          "Raw model JSON output" to see the full structured response.
+        </p>
+        <h3>Backend</h3>
+        <p>
+          On a GPU Space the model runs locally (fast after the first load). On a CPU Space
+          inference falls back to the Hugging Face Inference API — the first request may take
+          20–40 s while the model warms up; subsequent requests are faster.
+        </p>
+      </div>
+    </section>
+
+  </div><!-- /.page -->
+
+  <script>
+    // ── State ──────────────────────────────────────────────────────────────
+    let history = [];
+    let isLoading = false;
+    let lastBackend = "";
+
+    // ── Init ───────────────────────────────────────────────────────────────
+    document.addEventListener("DOMContentLoaded", () => {
+      loadModelInfo();
+
+      const sendBtn  = document.getElementById("btn-send");
+      const inputEl  = document.getElementById("chat-input");
+      const tempSldr = document.getElementById("temp-slider");
+      const tempVal  = document.getElementById("temp-val");
+      const resetBtn = document.getElementById("btn-reset-chat");
+
+      sendBtn.addEventListener("click", sendMessage);
+
+      inputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+        // auto-grow textarea
+        requestAnimationFrame(() => {
+          inputEl.style.height = "auto";
+          inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + "px";
+        });
+      });
+
+      tempSldr.addEventListener("input", () => {
+        tempVal.textContent = parseFloat(tempSldr.value).toFixed(2);
+      });
+
+      resetBtn.addEventListener("click", resetChat);
+
+      // Changing scenario/persona resets the conversation
+      document.getElementById("sel-scenario").addEventListener("change", resetChat);
+      document.getElementById("sel-persona").addEventListener("change", resetChat);
+    });
+
+    // ── Load model info ────────────────────────────────────────────────────
+    async function loadModelInfo() {
+      const badge   = document.getElementById("status-badge");
+      try {
+        const res  = await fetch("/api/model/info");
+        const data = await res.json();
+
+        const repoEl = document.getElementById("info-repo");
+        if (data.hub_url && data.model_repo) {
+          repoEl.innerHTML = `<a href="${data.hub_url}" target="_blank" rel="noopener">${data.model_repo}</a>`;
+        }
+        document.getElementById("info-base").textContent = data.base_model || "—";
+        document.getElementById("info-training").textContent = data.training || "—";
+        document.getElementById("info-note").textContent    = data.note || "—";
+
+        if (data.configured) {
+          badge.innerHTML = '<span class="badge ok">Trained model configured — inference ready</span>';
+        } else {
+          badge.innerHTML = '<span class="badge warn">Using public Hub repo — set HF_MODEL_REPO secret for local GPU inference</span>';
+        }
+      } catch (_e) {
+        badge.innerHTML = '<span class="badge err">Could not reach server</span>';
+      }
+    }
+
+    // ── Reset chat ─────────────────────────────────────────────────────────
+    function resetChat() {
+      history = [];
+      const win = document.getElementById("chat-window");
+      win.innerHTML = "";
+      setError(null);
+      document.getElementById("raw-details").style.display = "none";
+      document.getElementById("backend-tag").textContent = "";
+      addSystemMsg("Conversation reset. Send a message to begin.");
+    }
+
+    // ── Send ───────────────────────────────────────────────────────────────
+    async function sendMessage() {
+      if (isLoading) return;
+      const inputEl   = document.getElementById("chat-input");
+      const text      = inputEl.value.trim();
+      if (!text) return;
+
+      const scenarioId = document.getElementById("sel-scenario").value;
+      const persona    = document.getElementById("sel-persona").value;
+      const temp       = parseFloat(document.getElementById("temp-slider").value);
+
+      // Render user bubble
+      addMsg("user", text, null, null);
+      history.push({ role: "user", text });
+      inputEl.value = "";
+      inputEl.style.height = "auto";
+      setError(null);
+
+      // Thinking indicator
+      const thinkId = addThinking();
+      setLoading(true);
+
+      try {
+        const res = await fetch("/api/model/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: text,
+            scenario_id: scenarioId,
+            persona,
+            history: history.slice(0, -1),  // exclude the just-added user turn
+            temperature: temp,
+            max_tokens: 300,
+          }),
+        });
+
+        removeThinking(thinkId);
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        lastBackend = data.backend || "";
+
+        // Update backend tag
+        const backendTag = document.getElementById("backend-tag");
+        backendTag.innerHTML = `backend: <span>${lastBackend === "local" ? "local GPU" : "HF Inference API"}</span>`;
+
+        // Render model bubble
+        const utterance = data.utterance || "(no utterance)";
+        const offer     = data.offer_amount ?? null;
+        const tactic    = data.tactical_move || null;
+        addMsg("model", utterance, offer, tactic);
+        history.push({ role: "assistant", text: utterance });
+
+        // Show raw output
+        const rawDetails = document.getElementById("raw-details");
+        const rawPre     = document.getElementById("raw-pre");
+        rawPre.textContent = JSON.stringify({
+          utterance: data.utterance,
+          offer_amount: data.offer_amount,
+          tactical_move: data.tactical_move,
+        }, null, 2);
+        rawDetails.style.display = "block";
+
+      } catch (e) {
+        removeThinking(thinkId);
+        setError("Inference failed: " + e.message);
+        // remove last user turn from history so user can retry
+        history.pop();
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    // ── DOM helpers ────────────────────────────────────────────────────────
+    function formatCurrency(v) {
+      if (v == null) return null;
+      const n = parseFloat(v);
+      if (isNaN(n)) return null;
+      if (n >= 1_000_000) return "$" + (n / 1_000_000).toFixed(2) + "M";
+      if (n >= 1_000)     return "$" + (n / 1_000).toFixed(0) + "k";
+      return "$" + n.toFixed(0);
+    }
+
+    function addMsg(role, utterance, offerAmount, tacticMove) {
+      const win = document.getElementById("chat-window");
+
+      // Remove placeholder text if present
+      const empty = win.querySelector(".empty-hint");
+      if (empty) empty.remove();
+
+      const wrap = document.createElement("div");
+      wrap.className = `msg ${role}`;
+
+      const roleLabel = document.createElement("div");
+      roleLabel.className = "msg-role";
+      roleLabel.textContent = role === "user" ? "You" : "Model";
+      wrap.appendChild(roleLabel);
+
+      const body = document.createElement("div");
+      body.className = "msg-body";
+      body.textContent = utterance;
+
+      if (offerAmount != null) {
+        const chip = document.createElement("div");
+        chip.className = "offer-chip";
+        chip.textContent = formatCurrency(offerAmount) || String(offerAmount);
+        body.appendChild(chip);
+      }
+      if (tacticMove) {
+        const pill = document.createElement("span");
+        pill.className = "tactic-pill";
+        const labels = { anchor_high: "⚓ anchor", batna_reveal: "🃏 BATNA reveal", silence: "🤫 silence" };
+        pill.textContent = labels[tacticMove] || tacticMove;
+        body.appendChild(pill);
+      }
+
+      wrap.appendChild(body);
+      win.appendChild(wrap);
+      win.scrollTop = win.scrollHeight;
+      return wrap;
+    }
+
+    function addSystemMsg(text) {
+      const win = document.getElementById("chat-window");
+      const wrap = document.createElement("div");
+      wrap.className = "msg system";
+      const body = document.createElement("div");
+      body.className = "msg-body";
+      body.textContent = text;
+      wrap.appendChild(body);
+      win.appendChild(wrap);
+    }
+
+    let _thinkingSeq = 0;
+    function addThinking() {
+      const id = "think-" + (++_thinkingSeq);
+      const win = document.getElementById("chat-window");
+      const wrap = document.createElement("div");
+      wrap.className = "msg model thinking";
+      wrap.id = id;
+      const roleLabel = document.createElement("div");
+      roleLabel.className = "msg-role";
+      roleLabel.textContent = "Model";
+      const body = document.createElement("div");
+      body.className = "msg-body";
+      body.innerHTML = '<div class="dot-pulse"><span></span><span></span><span></span></div>';
+      wrap.appendChild(roleLabel);
+      wrap.appendChild(body);
+      win.appendChild(wrap);
+      win.scrollTop = win.scrollHeight;
+      return id;
+    }
+
+    function removeThinking(id) {
+      document.getElementById(id)?.remove();
+    }
+
+    function setLoading(on) {
+      isLoading = on;
+      document.getElementById("btn-send").disabled = on;
+      document.getElementById("chat-input").disabled = on;
+    }
+
+    function setError(msg) {
+      const box = document.getElementById("error-box");
+      if (msg) {
+        box.textContent = msg;
+        box.style.display = "block";
+      } else {
+        box.style.display = "none";
+      }
+    }
+  </script>
+</body>
+</html>

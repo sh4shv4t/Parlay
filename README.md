@@ -8,24 +8,27 @@ pinned: false
 tags: ["openenv", "hackathon", "rl", "gametheory"]
 ---
 
+<p align="center">
+  <img src="images/Parlay_square%20logo.png" alt="Parlay logo" width="220">
+</p>
+
 # Parlay ◈ — The Arena Where AIs Learn to Close
 
 **[▶ Play Now — HuggingFace Space](https://huggingface.co/spaces/sh4shv4t/Parlay)** |
-[Blog Post](https://huggingface.co/blog/sh4shv4t/parlay) |
+[Blog Post](BLOG.md) |
 [SFT Model](https://huggingface.co/sh4shv4t/parlay-sft-1-5b) |
 [GRPO Model](https://huggingface.co/sh4shv4t/parlay-grpo-1-5b) |
 [Dataset](https://huggingface.co/datasets/sh4shv4t/parlay-episodes) |
 [Training (HF / TRL pipeline)](training/notebooks/parlay_training.ipynb) |
 [OpenEnv reset/step rollouts](training/notebooks/openenv_rollout_training.ipynb) |
+[SFT — Colab (`parlay_sft_colab`)](https://colab.research.google.com/drive/1x5uZMbdKF7XeDNm-bM5YSPdpd1srgArA?usp=sharing) |
+[GRPO HF Job — Colab (`parlay_grpo_hf_job`)](https://colab.research.google.com/drive/1DNYogmRlR_YJrEO6GN3YC7xj8lfycDuL?usp=sharing) |
 [OpenEnv Manifest](openenv.yaml)
 
 ![Python 3.11](https://img.shields.io/badge/Python-3.11-blue)
 ![OpenEnv Compliant](https://img.shields.io/badge/OpenEnv-Compliant-00C853)
 ![MIT License](https://img.shields.io/badge/License-MIT-green)
 ![HF Spaces](https://img.shields.io/badge/HF%20Spaces-Ready-yellow)
-
-`Python 3.11` | `FastAPI` | `Gemini` | `GRPO` | `OpenEnv WebSocket`
-
 ---
 
 ## The Problem
@@ -298,6 +301,15 @@ python smoke_test.py              # 7 integration tests
 ```bash
 pytest tests/ -v
 ```
+
+### Git hooks (optional)
+
+```bash
+pip install -r requirements-dev.txt
+pre-commit install
+```
+
+Staged `__pycache__` paths and `.pyc` / `.pyo` files are blocked by a local pre-commit check (see `scripts/check_staged_not_pycache.py`).
 
 ### Focused modules (optional)
 
