@@ -366,7 +366,7 @@ def train_grpo(
         "gradient_accumulation_steps": grad_acc,
         "learning_rate": 5e-7,
         "num_generations": g,
-        "max_completion_length": 512,
+        "max_completion_length": 1024,
         "beta": 0.001,
         "epsilon": 0.2,
         "scale_rewards": "batch",
