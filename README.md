@@ -19,7 +19,8 @@ tags: ["openenv", "hackathon", "rl", "gametheory"]
 [SFT Model](https://huggingface.co/sh4shv4t/parlay-sft-1-5b) |
 [GRPO Model](https://huggingface.co/sh4shv4t/parlay-grpo-1-5b) |
 [Dataset](https://huggingface.co/datasets/sh4shv4t/parlay-episodes) |
-[Training Notebook](training/notebooks/parlay_full_pipeline.ipynb) |
+[Training (HF / TRL pipeline)](training/notebooks/parlay_training.ipynb) |
+[OpenEnv reset/step rollouts](training/notebooks/openenv_rollout_training.ipynb) |
 [OpenEnv Manifest](openenv.yaml)
 
 ![Python 3.11](https://img.shields.io/badge/Python-3.11-blue)
@@ -188,9 +189,11 @@ The ω warmup is a practical detail worth flagging: at step 0, the base model oc
 
 ![SFT training loss — Qwen2.5-1.5B + LoRA on Parlay episodes](images/sft_loss_curve.png)
 
-![Mean episode reward over GRPO training steps](results/grpo_reward_curve.png)
+GRPO curves below are from the **Hugging Face Job** run (L4, 80 steps, G=2, SFT `sh4shv4t/parlay-sft-1-5b` → [`sh4shv4t/parlay-grpo-1-5b`](https://huggingface.co/sh4shv4t/parlay-grpo-1-5b)). Points are TRL log lines every 5 steps; data is also in [`results/grpo_train_metrics.json`](results/grpo_train_metrics.json). Regenerate PNGs with `python scripts/plot_grpo_hf_job_curves.py`.
 
-![GRPO training loss](results/grpo_loss_curve.png)
+![Mean batch reward — GRPO training (HF Job log)](results/grpo_reward_curve.png)
+
+![GRPO training loss — same run](results/grpo_loss_curve.png)
 
 ![Four-way comparison: Random vs Gemini vs SFT vs SFT+GRPO](results/comparison.png)
 
@@ -246,7 +249,7 @@ uvicorn main:app --port 8000
 - `agent/`: Gemini client, ToM tracker, self-play runner.
 - `game/`: scenarios, tactical cards, leaderboard.
 - `dashboard/`: UI and API routes, spectator stream.
-- `training/`: dataset generation, SFT, GRPO, evaluation.
+- `training/`: dataset generation, SFT, GRPO, evaluation. Use [`training/notebooks/openenv_rollout_training.ipynb`](training/notebooks/openenv_rollout_training.ipynb) for **live** `reset` / `step` rollouts against the Space (OpenEnv protocol); use [`training/notebooks/parlay_training.ipynb`](training/notebooks/parlay_training.ipynb) for the Colab TRL-style pipeline.
 - `mcp_server/`: FastMCP tools.
 - `tests/`: keyless and module tests.
 

@@ -127,7 +127,8 @@ episode:
 # Training
 training:
   framework: "HuggingFace TRL (GRPO)"
-  notebook: "training/notebooks/parlay_full_pipeline.ipynb"
+  notebook: "training/notebooks/parlay_training.ipynb"
+  openenv_rollout_notebook: "training/notebooks/openenv_rollout_training.ipynb"
   pipeline:
     - step: "Gemini self-play data generation"
       script: "python -m training.generate_data --episodes 140"

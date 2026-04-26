@@ -189,12 +189,14 @@ def _save_training_plots(trainer, output_dir: str, tag: str = "grpo"):
         import matplotlib.pyplot as plt
         from pathlib import Path
 
+        # Unwrap ParlayGRPOEnvWrapper so we read the real GRPOTrainer.state
+        t_core = getattr(trainer, "trainer", trainer)
         results = Path("results")
         results.mkdir(exist_ok=True)
         plots = Path(output_dir) / "plots"
         plots.mkdir(parents=True, exist_ok=True)
 
-        log = getattr(getattr(trainer, "state", None), "log_history", []) or []
+        log = getattr(getattr(t_core, "state", None), "log_history", []) or []
         if not log:
             print("No log history to plot")
             return
@@ -364,7 +366,7 @@ def train_grpo(
         "gradient_accumulation_steps": grad_acc,
         "learning_rate": 5e-7,
         "num_generations": g,
-        "max_completion_length": 256,
+        "max_completion_length": 512,
         "beta": 0.001,
         "epsilon": 0.2,
         "scale_rewards": "batch",

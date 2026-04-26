@@ -143,9 +143,15 @@
     </section>
 
     <section>
-      <h2>GRPO Training Curve</h2>
+      <h2>GRPO — mean reward</h2>
       <div id="fig-reward"></div>
-      <p class="caption" id="cap-reward" hidden>Mean episode reward over 120 GRPO training steps. Dashed line = random baseline.</p>
+      <p class="caption" id="cap-reward" hidden>Mean batch reward (TRL log, every 5 steps). Reconstructed from the Hugging Face Job run: 80 steps, G=2, SFT base sh4shv4t/parlay-sft-1-5b.</p>
+    </section>
+
+    <section>
+      <h2>GRPO — training loss</h2>
+      <div id="fig-grpo-loss"></div>
+      <p class="caption" id="cap-grpo-loss" hidden>Policy loss from the same job log as the reward curve.</p>
     </section>
 
     <section>
@@ -217,15 +223,26 @@
         cap.hidden = true;
       }
     }
-    function rewardSection(pa) {
+    function rewardSection(url) {
       const el = document.getElementById("fig-reward");
       const cap = document.getElementById("cap-reward");
-      if (pa.reward_curve) {
-        el.innerHTML = '<img src="/results/grpo_reward_curve.png" alt="GRPO reward" style="width:100%;border:1px solid var(--gold);border-radius:2px" />';
+      if (url) {
+        el.innerHTML = '<img src="' + url + '" alt="GRPO reward" style="width:100%;border:1px solid var(--gold);border-radius:2px" />';
         cap.hidden = false;
       } else {
-        el.innerHTML = '<div class="fig-placeholder">Training curve will appear here after running the Colab notebook.<br/>' +
-          '<a href="https://colab.research.google.com/github/sh4shv4t/Parlay/blob/main/training/notebooks/parlay_training.ipynb" target="_blank" rel="noopener">→ Open training notebook on Google Colab</a></div>';
+        el.innerHTML = '<div class="fig-placeholder">Reward curve will appear when <code>results/grpo_reward_curve.png</code> is present (e.g. from a HF Job or ' +
+          '<a href="https://colab.research.google.com/github/sh4shv4t/Parlay/blob/main/training/notebooks/parlay_training.ipynb" target="_blank" rel="noopener">parlay_training.ipynb</a>).</div>';
+        cap.hidden = true;
+      }
+    }
+    function grpoLossSection(url) {
+      const el = document.getElementById("fig-grpo-loss");
+      const cap = document.getElementById("cap-grpo-loss");
+      if (url) {
+        el.innerHTML = '<img src="' + url + '" alt="GRPO training loss" style="width:100%;border:1px solid var(--gold);border-radius:2px" />';
+        cap.hidden = false;
+      } else {
+        el.innerHTML = '<div class="fig-placeholder">GRPO loss curve will appear when <code>results/grpo_loss_curve.png</code> is present.</div>';
         cap.hidden = true;
       }
     }
@@ -292,7 +309,8 @@
           document.querySelector(".subtitle")?.setAttribute("data-has-eval", "1");
         }
         sftSection(data.sft_loss_url);
-        rewardSection(data.plots_available);
+        rewardSection(data.grpo_reward_url);
+        grpoLossSection(data.grpo_loss_url);
         compareSection(data.plots_available);
         await transcriptSection(data.plots_available);
         hubSection(data);

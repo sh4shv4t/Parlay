@@ -3,7 +3,7 @@
 ## Training Results Page
 - Route: `GET /train` → `dashboard/train_results.html` (served from `main.py`)
 - API: `GET /api/training-status` → reads `results/eval_results.json` when present; exposes plot file flags and `HF_MODEL_REPO` presence
-- Static: `results/` at `/results/`, `images/` at `/images/` (e.g. committed `images/sft_loss_curve.png`) via `StaticFiles` in `main.py`
+- Static: `results/` at `/results/`, `images/` at `/images/` (e.g. `images/sft_loss_curve.png`, `results/grpo_*_curve.png`) via `StaticFiles` in `main.py`
 - `results/` is gitignored for data; plot PNGs/HTML can be committed intentionally if the team chooses
 - The `/train` page uses placeholders when files are missing
 - Training runs in Colab / local GPU — **not** inside the Space process

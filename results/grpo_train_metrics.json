@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "source": "Hugging Face Job",
+    "sft_model": "sh4shv4t/parlay-sft-1-5b",
+    "grpo_steps": 80,
+    "grpo_g": 2,
+    "flavor": "l4x1",
+    "train_loss_final": 0.0001051,
+    "repo": "sh4shv4t/parlay-grpo-1-5b"
+  },
+  "points": [
+    {
+      "step": 5,
+      "reward": -4.659,
+      "loss": 8.714e-05
+    },
+    {
+      "step": 10,
+      "reward": -4.604,
+      "loss": 0.0001001
+    },
+    {
+      "step": 15,
+      "reward": -4.764,
+      "loss": 4.062e-05
+    },
+    {
+      "step": 20,
+      "reward": -9.603,
+      "loss": 7.433e-05
+    },
+    {
+      "step": 25,
+      "reward": -4.233,
+      "loss": 0.0001185
+    },
+    {
+      "step": 30,
+      "reward": 0.5344,
+      "loss": 0.0002067
+    },
+    {
+      "step": 35,
+      "reward": 0.8288,
+      "loss": 0.0002253
+    },
+    {
+      "step": 40,
+      "reward": -4.509,
+      "loss": 5.42e-05
+    },
+    {
+      "step": 45,
+      "reward": 0.675,
+      "loss": 4.912e-05
+    },
+    {
+      "step": 50,
+      "reward": -4.456,
+      "loss": 0.0001332
+    },
+    {
+      "step": 55,
+      "reward": -9.468,
+      "loss": 0.0001032
+    },
+    {
+      "step": 60,
+      "reward": -9.338,
+      "loss": 4.481e-05
+    },
+    {
+      "step": 65,
+      "reward": 0.3431,
+      "loss": 5.264e-05
+    },
+    {
+      "step": 70,
+      "reward": 0.4913,
+      "loss": 0.0001981
+    },
+    {
+      "step": 75,
+      "reward": -4.505,
+      "loss": 0.0001187
+    },
+    {
+      "step": 80,
+      "reward": -9.64,
+      "loss": 7.517e-05
+    }
+  ]
+}

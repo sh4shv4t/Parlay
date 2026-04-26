@@ -353,6 +353,18 @@ def _training_status_payload() -> dict[str, Any]:
     elif (_RESULTS_DIR / "sft_loss_curve.png").is_file():
         sft_loss_path = "/results/sft_loss_curve.png"
 
+    grpo_reward_url: str | None = None
+    if (_IMAGES_DIR / "grpo_reward_curve.png").is_file():
+        grpo_reward_url = "/images/grpo_reward_curve.png"
+    elif (_RESULTS_DIR / "grpo_reward_curve.png").is_file():
+        grpo_reward_url = "/results/grpo_reward_curve.png"
+
+    grpo_loss_url: str | None = None
+    if (_IMAGES_DIR / "grpo_loss_curve.png").is_file():
+        grpo_loss_url = "/images/grpo_loss_curve.png"
+    elif (_RESULTS_DIR / "grpo_loss_curve.png").is_file():
+        grpo_loss_url = "/results/grpo_loss_curve.png"
+
     return {
         "has_results": has_results,
         "grpo_mean_reward": grpo,
@@ -361,8 +373,11 @@ def _training_status_payload() -> dict[str, Any]:
         "model_on_hub": bool(repo),
         "model_repo": repo,
         "sft_loss_url": sft_loss_path,
+        "grpo_reward_url": grpo_reward_url,
+        "grpo_loss_url": grpo_loss_url,
         "plots_available": {
-            "reward_curve": (_RESULTS_DIR / "grpo_reward_curve.png").is_file(),
+            "reward_curve": grpo_reward_url is not None,
+            "grpo_loss": grpo_loss_url is not None,
             "comparison": (_RESULTS_DIR / "training_curves.png").is_file(),
             "transcript": (_RESULTS_DIR / "before_after_transcript.html").is_file(),
             "sft_loss": sft_loss_path is not None,
