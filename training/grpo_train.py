@@ -41,7 +41,11 @@ def _row_total_reward(rec: dict) -> float | None:
 
 def build_grpo_dataset(jsonl_path: str, min_reward: float = -50.0):
     """
-    Build GRPO dataset. Each record needs only a 'prompt' field plus metadata.
+    Build GRPO dataset.     Each JSONL record supplies persona text in ``prompt`` and optional
+    ``conversation`` (first ``user`` or ``negotiator`` turn = player message).
+    The dataset ``prompt`` field is a Qwen2.5 chat string (system + user + open assistant)
+    from ``training.prompts_qwen.format_grpo_prompt``.
+
     The model generates G=8 completions per prompt; grader scores all 8.
 
     Args:
@@ -57,6 +61,10 @@ def build_grpo_dataset(jsonl_path: str, min_reward: float = -50.0):
     except ImportError as exc:
         raise ImportError("Install datasets: pip install datasets") from exc
 
+    from training.prompts_qwen import format_grpo_prompt, load_tokenizer_for_chat
+
+    _tok = load_tokenizer_for_chat(BASE_MODEL)
+
     prompts = []
     filtered = 0
     with open(jsonl_path, encoding="utf-8") as f:
@@ -68,10 +76,11 @@ def build_grpo_dataset(jsonl_path: str, min_reward: float = -50.0):
             if r is not None and r < min_reward:
                 filtered += 1
                 continue
-            # Extract ZOPA metadata for reward functions
+            # Qwen2.5 chat: system (persona) + first user/negotiator + assistant prefix for JSON generation
+            formatted_prompt = format_grpo_prompt(rec, tokenizer=_tok)
             prompts.append(
                 {
-                    "prompt": rec["prompt"],
+                    "prompt": formatted_prompt,
                     "scenario_id": rec.get("scenario_id", ""),
                     "persona": rec.get("persona", ""),
                     "batna_seller": _get_batna(rec.get("scenario_id", ""), "seller"),

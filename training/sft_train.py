@@ -55,12 +55,19 @@ def _row_total_reward(rec: dict) -> float | None:
     return None
 
 
-def load_sft_dataset(data_path: Path, min_reward: float = -50.0):
-    """Build a text dataset from JSONL prompt/completion pairs."""
+def load_sft_dataset(
+    data_path: Path, min_reward: float = -50.0, model_id: str | None = None
+):
+    """Build a text dataset from JSONL: Qwen2.5 chat (system + first user + assistant = negotiator)."""
     try:
         from datasets import Dataset
     except ImportError as exc:
         raise ImportError("Install datasets: pip install datasets") from exc
+
+    from training.prompts_qwen import format_sft_text, load_tokenizer_for_chat
+
+    mid = (model_id or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    _tok = load_tokenizer_for_chat(mid)
 
     rows: list[dict[str, str]] = []
     skipped = 0
@@ -99,10 +106,7 @@ def load_sft_dataset(data_path: Path, min_reward: float = -50.0):
             for completion in completions:
                 rows.append(
                     {
-                        "text": (
-                            f"<|system|>{prompt}</s>\n"
-                            f"<|assistant|>{completion}</s>"
-                        )
+                        "text": format_sft_text(rec, completion, tokenizer=_tok),
                     }
                 )
 
@@ -135,7 +139,7 @@ def train_sft(
     from peft import LoraConfig
     from trl import SFTConfig, SFTTrainer
 
-    dataset = load_sft_dataset(data_path, min_reward=min_reward)
+    dataset = load_sft_dataset(data_path, min_reward=min_reward, model_id=model_id)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     lora_config = LoraConfig(
