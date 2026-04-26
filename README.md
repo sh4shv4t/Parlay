@@ -10,10 +10,6 @@ tags: ["openenv", "hackathon", "rl", "gametheory"]
 
 # Parlay ◈ — The Arena Where AIs Learn to Close
 
-> *Negotiation is the hardest thing to teach a language model.
-> It requires hiding information, modeling opponents, adapting to surprises,
-> and knowing when to push and when to fold — all at once.*
-
 **[▶ Play Now — HuggingFace Space](https://huggingface.co/spaces/sh4shv4t/Parlay)** |
 [Blog Post](https://huggingface.co/blog/sh4shv4t/parlay) |
 [SFT Model](https://huggingface.co/sh4shv4t/parlay-sft-1-5b) |
