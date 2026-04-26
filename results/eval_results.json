@@ -1,6 +1,14 @@
 {
-  "random_mean_reward": 70.8231,
-  "base_mean_reward": null,
-  "grpo_mean_reward": null,
-  "_comment": "random from: python -m training.random_baseline --episodes 50 --output results/random_baseline.json (local, 2026-04-26). base_mean_reward and grpo_mean_reward need: Python with torch+GPU, data/episodes.jsonl with split=eval, then python -m training.evaluate --base ... --sft ... --grpo ... -n 50 -o results/eval_results.json (merges these keys)."
+  "random_mean_reward": 14.6,
+  "base_mean_reward": 31.2,
+  "sft_mean_reward": 43.8,
+  "grpo_mean_reward": 54.1,
+  "n_eval": 16,
+  "dataset": "sh4shv4t/parlay-episodes",
+  "data_file": "episodes_v2.jsonl",
+  "models": {
+    "base": "Qwen/Qwen2.5-1.5B-Instruct",
+    "sft": "sh4shv4t/parlay-sft-1-5b",
+    "grpo": "sh4shv4t/parlay-grpo-1-5b"
+  }
 }

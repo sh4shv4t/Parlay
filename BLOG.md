@@ -157,13 +157,49 @@ The ω warmup is a practical detail worth flagging: at step 0, the base model oc
 
 ## Results
 
-Four-bar comparison after 120 GRPO steps:
+The table below is the digest version. The training curves are where you *see* the two-stage story: SFT is **teaching the model to play the game by the rules**; GRPO is **making the grader the teacher**.
 
-| Agent | Mean Episode Reward |
-|-------|---------------------|
-| Random baseline | ~-55 |
-| Base model (Qwen2.5-1.5B) | ~+5 |
-| GRPO trained | ~+85 |
+### SFT: why the loss dives, then whispers
+
+<p align="center">
+  <img src="images/sft_loss_curve.png" alt="SFT training loss — Qwen2.5-1.5B + LoRA on Parlay episodes" width="720">
+  <br>
+  <em><strong>Figure.</strong> Supervised loss on high-quality, filtered negotiation episodes, not a generic “chat SFT” mix.</em>
+</p>
+
+This is next-token loss on a **tight, structured** dataset, Gemini self-play plus filters that keep only episodes that *already* look like the economics we care about, deals that close well, refusals that are principled, responses that track drift. The **fast early drop** is the model nailing the *syntax* of the task, JSON, turn order, the tactical vocabulary, and the broad statistics of *what good play looks like* in the data. It is a **huge, low-entropy move** in loss space because “talk like a negotiator” is still far easier to learn than “negotiate optimally against a live grader”.
+
+The **shallower later segment** is not “we gave up on training” and in fact is the signature of a model that has *mostly* become a good maximum-likelihood imitator on a *fixed* set of trajectories. Imitation has a **ceiling** that is *below* the best achievable policy, because the dataset cannot contain every future shock, persona twist, or bluff. That is the entire reason the pipeline does not stop at SFT. You want the policy **on the manifold of valid play**; then you turn on **GRPO** to optimise the **verifiable** reward that the environment actually grades.
+
+**Bottom line:** a steep left and a soft right on this plot is *exactly* what you want before RL: **a cold start that is already fluent**, so the RL stage spends its budget *searching in useful directions* instead of fighting format errors and nonsense moves.
+
+### GRPO: reward and loss, read like a pro
+
+The GRPO run I ship is a **Hugging Face Job** configuration (L4, 80 steps, small group size **G=2** for budget, SFT base [`sh4shv4t/parlay-sft-1-5b`](https://huggingface.co/sh4shv4t/parlay-sft-1-5b) into [`sh4shv4t/parlay-grpo-1-5b`](https://huggingface.co/sh4shv4t/parlay-grpo-1-5b)). The reward curve is mean batch return from the TRL log (sampled every few steps; full series in-repo as `grpo_train_metrics.json` or regenerated with `scripts/plot_grpo_hf_job_curves.py`).
+
+<p align="center">
+  <img src="images/grpo_reward_curve.png" alt="Mean batch reward during GRPO on Hugging Face Job" width="720">
+  <br>
+  <em><strong>Figure.</strong> GRPO mean reward — a stochastic process that should trend upward in expectation, not a line whose every tick must beat the last.</em>
+</p>
+
+**If you are waiting for a smooth exponential**, you are reading the wrong domain. Every batch is a *different* roll of personas, scenarios, and opponent noise; the group is only **G=2** completions. Some steps *will* go sideways. The signature of health is not silk-smooth monotonicity; it is a **wobbly** trace whose **envelope** shifts upward as the model learns to land on the high-reward side of the **ZOPA / ToM / format / anti-capitulation** composite. That is what “multi-objective policy gradient under a real environment” *looks* like in the log, honest variance instead of a fake curve fit.
+
+When the curve **flattens**, that is not automatically “stuck” either. It often means the policy has *stopped* doing the *catastrophically* bad moves that used to move the average a lot, so the **advantage** gets smaller, same story as late-stage RLHF, except our reward is a **grader** with cliffs and ToM, not a single human thumb up or down.
+
+The **policy loss** in GRPO is a *second* read, and it is **not** a duplicate of the reward plot.
+
+<p align="center">
+  <img src="images/grpo_loss_curve.png" alt="GRPO training loss — same run" width="720">
+  <br>
+  <em><strong>Figure.</strong> The GRPO / PPO-style loss reflects ratios, clipping, and KL, not a single clean CE target — it can and does move in ways that look “wrong” when reward is still doing the right thing on average.</em>
+</p>
+
+The objective is **not** “minimise this line as if it were validation cross-entropy.” It is a constrained policy update: the loss can **bump** when the optimiser is **trading** off exploration, KL, and the group-relative return. I still watch it. If the reward trace is *systematically* flat or down while the loss explodes, that is a red flag, but a **divergent pair** in the *healthy* case is: reward asks “*where* in outcome space are we ending up?”, the loss asks “*how much* did the policy *move* from the SFT prior this step?”. Both matter; they are **not the same number**.
+
+**One sentence I would put on a slide:** SFT is **fluency in the world of the deal**; GRPO is **pressure-testing that fluency under the only score that actually counts, the grader in the live loop.**
+
+---
 
 The qualitative shift is more interesting than the numbers. The base model capitulates the moment the Shark sets an aggressive anchor — it treats "that's not workable" as information about true value, not as a tactic. After GRPO training, the same Shark anchor gets met with silence or a counter-anchor. The model has learned that the opening number is a reference point manipulation, not a real constraint.
 
@@ -292,6 +328,6 @@ The human-as-teacher flywheel is inspired by RLHF's core insight: human preferen
 
 ---
 
-*Code: [github.com/sh4shv4t/parlay](https://github.com/sh4shv4t/parlay) · Space: [huggingface.co/spaces/sh4shv4t/parlay](https://huggingface.co/spaces/sh4shv4t/parlay)*
+*Code: [github.com/sh4shv4t/Parlay](https://github.com/sh4shv4t/Parlay) · Space: [huggingface.co/spaces/sh4shv4t/Parlay](https://huggingface.co/spaces/sh4shv4t/Parlay)*
 
 *— Shashvat Singh*

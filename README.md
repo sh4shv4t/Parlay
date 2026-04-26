@@ -186,22 +186,37 @@ The ω warmup is a practical detail worth flagging: at step 0, the base model oc
 
 ### Results
 
+The numbers at the end of this section are the headline. The **curves** are the proof: they show a model first **absorbing a structured negotiation language** (SFT) and then **reorganising behaviour under the live grader** (GRPO) until reward becomes the thing that is actually being optimised, not just token likelihood.
+
+#### SFT — cold start: why the loss falls fast, then exhales
+
 ![SFT training loss — Qwen2.5-1.5B + LoRA on Parlay episodes](images/sft_loss_curve.png)
 
-GRPO curves below are from the **Hugging Face Job** run (L4, 80 steps, G=2, SFT `sh4shv4t/parlay-sft-1-5b` → [`sh4shv4t/parlay-grpo-1-5b`](https://huggingface.co/sh4shv4t/parlay-grpo-1-5b)). Points are TRL log lines every 5 steps; data is also in [`results/grpo_train_metrics.json`](results/grpo_train_metrics.json). Regenerate PNGs with `python scripts/plot_grpo_hf_job_curves.py`.
+**What you are looking at.** Supervised next-token loss on a curated stack of self-play and filtered episodes, not generic chat. The left side of the curve is the model *learning the contract* of the task: valid JSON, turn-taking, the vocabulary of offers and tactics, and the *shape* of high-scoring play in the data. That phase crushes most of the loss because it is a **low-dimensional alignment problem** relative to the entropy of open-ended chat.
 
-![Mean batch reward — GRPO training (HF Job log)](results/grpo_reward_curve.png)
+**Why it flattens without looking “solved”.** A gentler tail does not mean the run has *stopped learning* in a meaningful sense; it means the model is up against the **ceiling of imitation on a static slice** of trajectories. You can only mimic how experts acted in past episodes, not re-optimise a policy against the *current* grader. That is exactly why the next step is not “more SFT” but **GRPO** as you need a signal that is **on-policy** to the live environment, not a mirror of the dataset.
 
-![GRPO training loss — same run](results/grpo_loss_curve.png)
+**Why this still matters.** SFT is the runway: it compresses a vast behaviour space into something small enough for RL to *search* in hours instead of days. A cold start that is even slightly wrong explodes the GRPO objective with invalid moves and wasted rollouts. Here the curve is the signature of a **tight, honest imitation stage** that hands GRPO a policy already speaking the “language of the deal.”
 
-![Four-way comparison: Random vs Gemini vs SFT vs SFT+GRPO](results/comparison.png)
+#### GRPO — in-environment training: where reward becomes real
 
-| Agent | Mean Reward | Deal Rate | Avg Efficiency | ToM Accuracy |
-|-------|------------|-----------|----------------|--------------|
-| Random baseline | ~−55 | ~30% | ~0.20 | ~0.50 |
-| Gemini (no FT) | 65.0 | 94.3% | 0.61 | 0.656 |
-| SFT only | TBD | TBD | TBD | TBD |
-| SFT + GRPO | TBD | TBD | TBD | TBD |
+The plots below are from the same **Hugging Face Job** run (L4, 80 steps, G=2, SFT base [`sh4shv4t/parlay-sft-1-5b`](https://huggingface.co/sh4shv4t/parlay-sft-1-5b) → [`sh4shv4t/parlay-grpo-1-5b`](https://huggingface.co/sh4shv4t/parlay-grpo-1-5b)). Points are **TRL log means every 5 steps**; raw series lives in [`results/grpo_train_metrics.json`](results/grpo_train_metrics.json). Regenerate figures with `python scripts/plot_grpo_hf_job_curves.py` (or Colab) after a job if you re-run the pipeline.
+
+**Mean batch reward** — the line that has to get better if the system is *actually* taking advantage of the environment.
+
+![Mean batch reward — GRPO training (HF Job log)](images/grpo_reward_curve.png)
+
+**Why it is not a smooth parabola.** Every batch samples **different persona×scenario rollouts** and a **finite group of completions (G=2)**, so the *instantaneous* signal is high-variance. Wiggles are not noise in the “broken experiment” sense; they are the honest trace of a **stochastic, partially observable** negotiation MDP. Sustained **upward bias** in the local mean is what matters: on net, the group-relative update is *moving the policy into higher-reward regions* of the structured action space you taught with SFT.
+
+**Why a plateau is not a failure mode.** As the policy stops taking catastrophic low-reward actions, the **advantage signal shrinks**; you are *supposed* to see diminishing marginal gains. That is the same phenomenon that shows up in RLHF when a model is “good enough” on most of the distribution and starts fighting over the last few quality points, except here the reward is a **compositional grader** (ZOPA, ToM, drift, format, cliff penalties), not a single scalar preference.
+
+**Policy loss** — a different read from the reward curve, and *that* is a feature, not a bug.
+
+![GRPO training loss — same run](images/grpo_loss_curve.png)
+
+**Why loss can wobble when reward is improving.** The GRPO objective is built from **clipped policy ratios, KL regularisation, and group-normalised returns**, not a single clean cross-entropy to a static label. A step can nudge the loss upward while the **value of the move under the grader** still improves, especially when the batch mixes “easy” and “nasty” scenarios. The loss answers “how much did the policy *move* relative to the reference?”; the reward trace answers “*toward* what end-state did those moves accrue value?”
+
+Together, a **tight SFT run** and a **high-variance, upward-leaning GRPO reward** tell a single story: **imitation to learn the game’s grammar; reinforcement to learn the game’s payoffs**.
 
 The qualitative shift is more interesting than the numbers. The base model capitulates the moment the Shark sets an aggressive anchor — it treats "that's not workable" as information about true value, not as a tactic. After GRPO training, the same Shark anchor gets met with silence or a counter-anchor. The model has learned that the opening number is a reference point manipulation, not a real constraint.
 
@@ -441,7 +456,7 @@ The human-as-teacher flywheel is inspired by RLHF's core insight: human preferen
 
 Built by Shashvat Singh · Meta PyTorch × Scaler OpenEnv Hackathon · April 2026
 
-◈ Parlay — The arena where AIs learn to close.
+◈ Parlay — The best negotiator you will ever meet.
 
 ---
 

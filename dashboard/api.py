@@ -342,6 +342,7 @@ def _training_status_payload() -> dict[str, Any]:
     eval_path = _RESULTS_DIR / "eval_results.json"
     grpo: float | None = None
     base: float | None = None
+    sft: float | None = None
     rnd: float | None = None
     has_results = False
     if eval_path.is_file():
@@ -350,11 +351,14 @@ def _training_status_payload() -> dict[str, Any]:
             has_results = True
             grpo = raw.get("grpo_mean_reward")
             base = raw.get("base_mean_reward")
+            sft = raw.get("sft_mean_reward")
             rnd = raw.get("random_mean_reward")
             if grpo is not None:
                 grpo = float(grpo)
             if base is not None:
                 base = float(base)
+            if sft is not None:
+                sft = float(sft)
             if rnd is not None:
                 rnd = float(rnd)
         except Exception:  # noqa: BLE001
@@ -407,6 +411,7 @@ def _training_status_payload() -> dict[str, Any]:
     return {
         "has_results": has_results,
         "grpo_mean_reward": grpo,
+        "sft_mean_reward": sft,
         "base_mean_reward": base,
         "random_mean_reward": rnd,
         "model_on_hub": bool(repo),

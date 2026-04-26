@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=EB+Garamond:ital,wght@0,400;0,500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <style>
     :root {
       --felt: #1c2b1a;
@@ -107,6 +108,12 @@
     }
     .read-block p { margin: 0 0 0.65rem 0; }
     .read-block p:last-child { margin-bottom: 0; }
+    .compare-chart-wrap {
+      min-height: 300px; position: relative; padding: 0.5rem 0.5rem 0.25rem;
+      background: var(--ivory); border: 1px solid rgba(201, 168, 76, 0.45);
+      border-radius: 4px;
+    }
+    .results-disclaimer { text-align: center; font-size: 0.85rem; color: var(--smoke); margin: 2.5rem 0 0; }
   </style>
 </head>
 <body>
@@ -127,7 +134,6 @@
 
     <section>
       <h2>Key Numbers</h2>
-      <p class="caption" style="margin:0 0 0.75rem 0">Mean episode reward for the same eval protocol: random play, the frozen base (instruction) model, and your GRPO model.</p>
       <div class="card-row" id="key-numbers">
         <div class="num-card">
           <h3>Random baseline</h3>
@@ -166,7 +172,6 @@
     <section>
       <h2>Random vs Base vs GRPO</h2>
       <div id="fig-compare"></div>
-      <p class="caption" id="cap-compare" hidden>Four-bar comparison. Each bar is mean reward over 50 eval episodes.</p>
     </section>
 
     <section>
@@ -201,6 +206,8 @@
 5. Results auto-commit to results/ and push to this Space</pre>
       </details>
     </section>
+
+    <p class="results-disclaimer">Results are subject to change / demo</p>
   </div>
 
   <script>
@@ -217,6 +224,7 @@
         badge.innerHTML = '<span class="badge wait">Hub checkpoint is live; set <code>HF_MODEL_REPO</code> for the trained in-app opponent</span>';
       }
     }
+    let _compareChart = null;
     function renderKeyNumbers(data) {
       const r = data.random_mean_reward, b = data.base_mean_reward, g = data.grpo_mean_reward;
       document.getElementById("k-random").textContent = fmt(r);
@@ -229,6 +237,60 @@
         d.textContent = (x >= 0 ? "↑ +" : "↓ ") + x.toFixed(1) + " vs baseline";
         d.style.color = x >= 0 ? "var(--emerald)" : "var(--scarlet)";
       }
+    }
+    function buildCompareBarChart(r, b, g) {
+      const canvas = document.getElementById("compare-bar-chart");
+      if (!canvas || typeof Chart === "undefined") return null;
+      const to = (v) => (typeof v === "number" && !Number.isNaN(v) ? v : null);
+      return new Chart(canvas, {
+        type: "bar",
+        data: {
+          labels: ["Random", "Base", "GRPO"],
+          datasets: [
+            {
+              data: [to(r), to(b), to(g)],
+              backgroundColor: ["rgba(139, 26, 26, 0.55)", "rgba(107, 101, 96, 0.45)", "rgba(26, 92, 42, 0.55)"],
+              borderColor: ["#8b1a1a", "#5c6b7a", "#1a5c2a"],
+              borderWidth: 1,
+              borderRadius: 4,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            title: {
+              display: true,
+              text: "Parlay — Random vs Base vs GRPO (mean reward)",
+              color: "#1a1208",
+              font: { size: 15, weight: "600" },
+            },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => {
+                  const y = ctx.raw;
+                  if (y == null) return " —";
+                  return " " + (typeof y === "number" ? y.toFixed(1) : y);
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              ticks: { color: "#3d3a36" },
+              grid: { color: "rgba(0,0,0,0.07)" },
+            },
+            y: {
+              beginAtZero: true,
+              ticks: { color: "#3d3a36" },
+              grid: { color: "rgba(0,0,0,0.09)" },
+              title: { display: true, text: "Mean reward", color: "#5c5a56" },
+            },
+          },
+        },
+      });
     }
     function sftSection(url) {
       const el = document.getElementById("fig-sft");
@@ -268,15 +330,31 @@
     }
     function compareSection(data) {
       const el = document.getElementById("fig-compare");
-      const cap = document.getElementById("cap-compare");
+      if (!el) return;
+      const r = data.random_mean_reward, b = data.base_mean_reward, g = data.grpo_mean_reward;
+      const hasNumbers = [r, b, g].some(
+        (v) => typeof v === "number" && !Number.isNaN(v),
+      );
+      if (_compareChart) {
+        _compareChart.destroy();
+        _compareChart = null;
+      }
+      if (hasNumbers) {
+        el.innerHTML =
+          '<div class="compare-chart-wrap"><canvas id="compare-bar-chart" height="300" role="img" aria-label="Random vs Base vs GRPO mean reward"></canvas></div>';
+        setTimeout(function () {
+          _compareChart = buildCompareBarChart(r, b, g);
+        }, 0);
+        return;
+      }
       const url = data.comparison_url;
       if (url) {
-        el.innerHTML = '<img src="' + url + '" alt="Random vs Base vs GRPO comparison" style="width:100%;border:1px solid var(--gold);border-radius:2px" />';
-        cap.hidden = false;
-      } else {
-        el.innerHTML = '<div class="fig-placeholder">Four-bar chart: add <code>images/training_curves.png</code> (or <code>results/training_curves.png</code>) or run eval to generate a comparison.</div>';
-        cap.hidden = true;
+        el.innerHTML =
+          '<img src="' + url + '" alt="Random vs Base vs GRPO comparison" style="width:100%;border:1px solid var(--gold);border-radius:2px" />';
+        return;
       }
+      el.innerHTML =
+        '<div class="fig-placeholder">Add <code>results/eval_results.json</code> with mean rewards, or run <code>python -m training.evaluate</code> and add <code>images/training_curves.png</code>.</div>';
     }
     function hubSection(data) {
       const h = document.getElementById("hub-block");
