@@ -76,6 +76,31 @@ def _parse_offer_anti_capitulation(completion: str) -> float | None:
     return None
 
 
+def _offer_amount_from_parsed(data: object) -> float:
+    """
+    Extract a numeric offer from JSON that may be a dict or a list of dicts
+    (models sometimes return [{...}] instead of a single object).
+    """
+    if isinstance(data, dict):
+        oa = data.get("offer_amount", data.get("offer"))
+    elif isinstance(data, list):
+        oa = None
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            oa = item.get("offer_amount", item.get("offer"))
+            if oa is not None:
+                break
+    else:
+        oa = None
+    if oa is None:
+        return 0.0
+    try:
+        return float(oa) if oa else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def negotiation_efficiency_reward(completions: list[str], **kwargs) -> list[float]:
     """
     Primary reward: fraction of ZOPA captured by the AI agent.
@@ -107,7 +132,7 @@ def negotiation_efficiency_reward(completions: list[str], **kwargs) -> list[floa
     for completion in completions:
         try:
             data = json.loads(_clean_json(completion))
-            offer = float(data.get("offer_amount") or 0)
+            offer = _offer_amount_from_parsed(data)
             if offer > 0:
                 if is_buyer_ai:
                     # AI is buyer: lower offers are better; score = (buyer_batna - offer) / width
@@ -118,7 +143,7 @@ def negotiation_efficiency_reward(completions: list[str], **kwargs) -> list[floa
                 rewards.append(float(E * GAMMA))
             else:
                 rewards.append(0.0)
-        except (json.JSONDecodeError, ValueError, KeyError) as exc:
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError, AttributeError) as exc:
             logger.debug(f"negotiation_efficiency_reward parse error: {exc}")
             rewards.append(0.0)
     return rewards
