@@ -11,3 +11,5 @@ checkpoints/
 # Keep Python source, drop generated artifacts under parlay_env/
 parlay_env/
 !parlay_env/**/*.py
+
+.cursorrules
