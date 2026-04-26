@@ -4,7 +4,7 @@ Produces the reward curve and before/after metrics shown to judges.
 
 Usage:
     python -m training.evaluate \
-        --base Qwen/Qwen2.5-7B-Instruct \
+        --base Qwen/Qwen2.5-1.5B-Instruct \
         --sft models/parlay-sft \
         --grpo models/parlay-grpo \
         --data data/episodes.jsonl \
@@ -401,7 +401,7 @@ def _save_transcript_artifact(data_path: str, output_dir: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate Parlay training pipeline")
-    parser.add_argument("--base", default="Qwen/Qwen2.5-7B-Instruct")
+    parser.add_argument("--base", default="Qwen/Qwen2.5-1.5B-Instruct")
     parser.add_argument("--sft", default="models/parlay-sft")
     parser.add_argument("--grpo", default="models/parlay-grpo")
     parser.add_argument("--base_model", default="")
