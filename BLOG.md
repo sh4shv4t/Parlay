@@ -173,6 +173,14 @@ The qualitative shift is more interesting than the numbers. The base model capit
 
 The environment is live on [Hugging Face Spaces](https://huggingface.co/spaces/sh4shv4t/Parlay).
 
+You don’t have to stick to API calls and instead you can **interact with the AI models in the web app**: pick a persona and scenario, type offers and tactics, and see how you fare against an opponent shown as a **3D character**. The interface surfaces **ZOPA** (the zone of possible agreement), **Theory-of-Mind**-style belief metrics, and how negotiation moves nudge those bars over time, so the “physics” of the deal is visible alongside the dialogue.
+
+<p align="center">
+  <img src="images/Parlay_frontend_interactwithchar.png" alt="Parlay UI: negotiation with a 3D opponent and live ZOPA and ToM metrics" width="920">
+  <br>
+  <em><strong>Figure.</strong> Playing in the browser: 3D opponent avatar, chat and tactical actions, and live analytics (ZOPA, belief state) as the negotiation evolves.</em>
+</p>
+
 You can connect to it directly via OpenEnv:
 
 ```python
@@ -186,7 +194,7 @@ while not obs.done:
     obs = env.step(action)
 ```
 
-Or just play it in the browser. I promise the Veteran will make you uncomfortable.
+Or stay in the Space’s game view and spar there, the 3D personas and metrics make it obvious when you’re winning or eroding the deal zone. I promise the Veteran will make you uncomfortable.
 
 ---
 

@@ -12,7 +12,7 @@ tags: ["openenv", "hackathon", "rl", "gametheory"]
   <img src="images/Parlay_square%20logo.png" alt="Parlay logo" width="220">
 </p>
 
-# Parlay ◈ — The Arena Where AIs Learn to Close
+# Parlay ◈ — The Best Negotiator you will ever meet
 
 **[▶ Play Now — HuggingFace Space](https://huggingface.co/spaces/sh4shv4t/Parlay)** |
 [Blog Post](BLOG.md) |
@@ -348,6 +348,14 @@ python -m mcp_server.server sse
 Here's the angle that I believe has the most value when building this: the same environment that trains AI agents turns out to be a genuinely useful coaching tool for human sales reps.
 
 Most negotiation training goes like this: a sales manager plays the buyer, the rep plays the seller, and they both know the manager is going easy on them because he has a 4pm call. It's not a real test and everyone knows it.
+
+**Interact with the AI in the browser.** You choose a scenario and opponent, then negotiate in real time against the models behind the Space—not just a chat box, but a full game view with stylized **3D avatars** for each persona. The UI shows **live deal analytics**: the **ZOPA** band (where a deal is even possible), **Theory-of-Mind** belief bars (cooperative, competitive, reservation, flexibility), and traces of how those signals move as the conversation unfolds—so you can see how your tactics and offers reshape the opponent’s inferred state, not only the transcript.
+
+<p align="center">
+  <img src="images/Parlay_frontend_interactwithchar.png" alt="Parlay UI: chat negotiation with a 3D opponent avatar, tactical actions, and live ZOPA and ToM metrics" width="920">
+  <br>
+  <em><strong>Figure.</strong> In-game view: negotiate against a persona rendered as a 3D character, use tactical moves (e.g. anchor, BATNA reveal), and watch ZOPA and ToM-style metrics respond turn by turn.</em>
+</p>
 
 Parlay is different in three ways.
 
